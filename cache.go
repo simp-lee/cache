@@ -1,5 +1,5 @@
-// Package cache provides a sharded in-memory cache with expiration capabilities and persistence.
-package cache
+// Package shardedcache provides a sharded in-memory cache with expiration capabilities and persistence.
+package shardedcache
 
 import (
 	"sync"
@@ -25,13 +25,13 @@ type CacheInterface interface {
 }
 
 type Options struct {
-	MaxSize           int           // Maximum number of items per shard, 0 means unlimited
-	DefaultExpiration time.Duration // Default expiration time, 0 means never expire
-	CleanupInterval   time.Duration // Cleanup interval, 0 means no automatic cleanup
-	PersistPath       string        // Persistence file path
-	PersistInterval   time.Duration // Persistence interval
-	PersistThreshold  int           // Incremental persistence threshold (modification count)
-	ShardCount        int           // Number of shards, must be a power of 2
+	MaxSize           int           // Maximum items per shard (0 = unlimited)
+	DefaultExpiration time.Duration // Default item expiration time (0 = no expiration)
+	CleanupInterval   time.Duration // Interval for cleaning expired items (0 = disable auto cleanup, defaults to 11m)
+	PersistPath       string        // File path for persistence storage (empty = disable persistence)
+	PersistInterval   time.Duration // Interval for data persistence (0 = disable auto persistence, defaults to 13m)
+	PersistThreshold  int           // Number of changes before triggering persistence (0 = persist every change, defaults to 100)
+	ShardCount        int           // Number of cache shards, must be power of 2 (defaults to 32)
 }
 
 var (

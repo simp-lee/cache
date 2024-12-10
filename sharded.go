@@ -1,4 +1,4 @@
-package cache
+package shardedcache
 
 import (
 	"fmt"
