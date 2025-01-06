@@ -600,3 +600,59 @@ func TestCachePersistence1(t *testing.T) {
 		}
 	})
 }
+
+func TestGroupPersistence(t *testing.T) {
+	dir, err := os.MkdirTemp("", "cache-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	t.Run("Group Persistence", func(t *testing.T) {
+		// 创建带持久化的缓存实例
+		cache := NewCache(Options{
+			PersistPath:     filepath.Join(dir, "group-test"),
+			PersistInterval: 100 * time.Millisecond,
+			ShardCount:      2,
+		})
+		defer cache.Close()
+
+		// 使用组设置一些数据
+		users := cache.Group("users")
+		posts := cache.Group("posts")
+
+		users.Set("1", "user1")
+		users.SetWithExpiration("2", "user2", 200*time.Millisecond)
+		posts.Set("1", "post1")
+
+		// 等待持久化
+		time.Sleep(150 * time.Millisecond)
+
+		// 创建新的缓存实例
+		newCache := NewCache(Options{
+			PersistPath: filepath.Join(dir, "group-test"),
+			ShardCount:  2,
+		})
+		defer newCache.Close()
+
+		// 验证组数据
+		newUsers := newCache.Group("users")
+		newPosts := newCache.Group("posts")
+
+		// 检查永久键
+		if val, exists := newUsers.Get("1"); !exists || val != "user1" {
+			t.Error("Permanent key in group should be loaded")
+		}
+
+		// 检查过期键
+		time.Sleep(100 * time.Millisecond) // 等待过期
+		if _, exists := newUsers.Get("2"); exists {
+			t.Error("Expired key in group should not be loaded")
+		}
+
+		// 检查其他组的键
+		if val, exists := newPosts.Get("1"); !exists || val != "post1" {
+			t.Error("Key in other group should be loaded")
+		}
+	})
+}

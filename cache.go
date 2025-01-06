@@ -22,6 +22,7 @@ type CacheInterface interface {
 	Has(key string) bool
 	Clear() error
 	Close()
+	Group(name string) Group
 }
 
 type Options struct {

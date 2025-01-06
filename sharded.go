@@ -275,6 +275,14 @@ func (sc *ShardedCache) Close() {
 	wg.Wait()
 }
 
+// Group implements CacheInterface
+func (sc *ShardedCache) Group(name string) Group {
+	return &cacheGroup{
+		cache:     sc,
+		groupName: name,
+	}
+}
+
 // nextPowerOf2 returns the smallest power of 2 that is greater than or equal to v
 // Examples:
 // Input: 7  -> Output: 8

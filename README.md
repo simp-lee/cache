@@ -1,6 +1,6 @@
 # Sharded In-Memory Cache
 
-This is a version of the sharded in-memory cache implementation with significant improvements in performance and features.
+A high-performance sharded in-memory cache for Go, featuring group namespaces, disk persistence, and comprehensive cache operations. Designed for concurrent access with excellent performance characteristics.
 
 ## Important Notice
 This is a new version of [SwiftCache](https://github.com/simp-lee/SwiftCache). Both versions use sharded architecture for high concurrent performance, but with different focus:
@@ -11,6 +11,8 @@ This is a new version of [SwiftCache](https://github.com/simp-lee/SwiftCache). B
 - **Comprehensive Statistics**: Added detailed cache statistics including hit rates and item counts
 - **Better Memory Management**: More efficient memory usage for large datasets
 - **Eviction Callbacks**: Support for custom eviction handlers
+- **Group Support**: Efficient namespace management with full feature support for grouped cache operations
+- **Type-Safe Get Operations**: Added utility functions like `GetTyped[T](cache, key)` to retrieve values with type safety using generics
 
 ### Note on Eviction Policies
 This version focuses on time-based expiration. If you need LRU/FIFO eviction policies, please use [SwiftCache](https://github.com/simp-lee/SwiftCache).
@@ -86,13 +88,13 @@ Choose `ShardedCache` when you need:
 - Consistent high performance across all operations
 - Good memory efficiency
 - Reliable concurrent access
-- Rich feature set including expiration and statistics
+- Rich feature set including expiration, statistics, and group support
 
 ## Installation
 
 To use this cache in your Go project, you can import it as follows:
 
-```go
+```shell
 go get github.com/simp-lee/cache
 ```
 
@@ -148,6 +150,28 @@ type CacheInterface interface {
     
     // Close shuts down the cache and persists data if configured
     Close()
+
+    // Group provides a way to create a named group of items in the cache
+    Group(name string) Group
+}
+
+type Group interface {
+    // Basic operations
+    Set(key string, value interface{})
+    SetWithExpiration(key string, value interface{}, expiration time.Duration)
+    Get(key string) (interface{}, bool)
+    GetWithExpiration(key string) (interface{}, *time.Time, bool)
+    Delete(key string) error
+    
+    // Convenience methods
+    GetOrSet(key string, value interface{}) interface{}
+    GetOrSetFunc(key string, f func() interface{}) interface{}
+    GetOrSetFuncWithExpiration(key string, f func() interface{}, expiration time.Duration) interface{}
+    
+    // Group management
+    Keys() []string
+    Clear() error
+    Count() int
 }
 ```
 
@@ -200,7 +224,38 @@ cache.Set("key", "value")
 value, exists := cache.Get("key")
 ```
 
-#### 3. Type-Safe Get Operations
+#### 3. Group Support
+
+Cache groups provide a way to namespace your cache keys and perform operations on a group of related items. Groups are virtual and add no memory overhead while providing full isolation between different namespaces.
+
+```go
+// Create groups for different types of items
+users := cache.Group("users")
+posts := cache.Group("posts")
+
+// Set values in different groups
+users.Set("1", userData)
+posts.Set("1", postData)
+
+// Groups are isolated
+usersValue, _ := users.Get("1")  // gets userData
+postsValue, _ := posts.Get("1")  // gets postData
+
+// Group with expiration
+users.SetWithExpiration("2", userData2, time.Hour)
+
+// Convenience methods
+value := users.GetOrSet("3", defaultValue)
+value = users.GetOrSetFunc("4", func() interface{} {
+    // Fetch user from database
+    return fetchUserFromDB("4")
+})
+
+// Clear the group
+users.Clear()
+```
+
+#### 4. Type-Safe Get Operations
 
 `GetTyped` is a utility function to retrieve values with type safety using generics:
 

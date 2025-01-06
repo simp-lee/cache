@@ -126,7 +126,7 @@ func BenchmarkShardedCache(b *testing.B) {
 	})
 
 	b.Run("Delete", func(b *testing.B) {
-		// 先预填充一些数据用于删��
+		// 先预填充一些数据用于删除
 		for i := 0; i < 100000; i++ {
 			cache.Set(fmt.Sprintf("del-key-%d", i), i)
 		}
@@ -561,4 +561,34 @@ func BenchmarkMixedLoadWithPersist(b *testing.B) {
 			c.Close() // 最后关闭缓存
 		})
 	}
+}
+
+func BenchmarkCacheGroup(b *testing.B) {
+	cache := NewCache(Options{ShardCount: 32})
+	users := cache.Group("users")
+
+	// 预填充一些数据
+	for i := 0; i < 1000; i++ {
+		users.Set(fmt.Sprintf("%d", i), fmt.Sprintf("user-%d", i))
+	}
+
+	b.Run("GroupSet", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			var i int64
+			for pb.Next() {
+				key := fmt.Sprintf("%d", atomic.AddInt64(&i, 1))
+				users.Set(key, fmt.Sprintf("user-%s", key))
+			}
+		})
+	})
+
+	b.Run("GroupGet", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			var i int64
+			for pb.Next() {
+				key := fmt.Sprintf("%d", atomic.AddInt64(&i, 1)%1000)
+				users.Get(key)
+			}
+		})
+	})
 }
