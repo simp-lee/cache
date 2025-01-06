@@ -92,8 +92,7 @@ func (cs *cacheShard) setWithExpiration(key string, value interface{}, expiratio
 }
 
 func (cs *cacheShard) setWithExpirationUnlocked(key string, value interface{}, expiration time.Duration) {
-	var item *cacheItem
-	item = itemPool.Get().(*cacheItem)
+	item := itemPool.Get().(*cacheItem)
 
 	if expiration > 0 {
 		t := timePool.Get().(*time.Time)
