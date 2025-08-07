@@ -34,6 +34,17 @@ func TestCacheGroup(t *testing.T) {
 			t.Error("Failed to delete key from group")
 		}
 
+		// 测试 Has 方法
+		if !users.Has("2") {
+			t.Error("Has should return true for existing key")
+		}
+		if users.Has("1") {
+			t.Error("Has should return false for deleted key")
+		}
+		if users.Has("nonexistent") {
+			t.Error("Has should return false for nonexistent key")
+		}
+
 		// 清空整个组
 		users.Clear()
 		if len(users.Keys()) != 0 {

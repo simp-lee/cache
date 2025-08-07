@@ -18,6 +18,7 @@ type Group interface {
 	// Group operations
 	Keys() []string
 	Count() int
+	Has(key string) bool
 	Clear() error
 }
 
@@ -83,6 +84,10 @@ func (g *cacheGroup) Keys() []string {
 
 func (g *cacheGroup) Count() int {
 	return len(g.Keys())
+}
+
+func (g *cacheGroup) Has(key string) bool {
+	return g.cache.Has(g.buildKey(key))
 }
 
 func (g *cacheGroup) Clear() error {

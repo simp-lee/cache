@@ -172,6 +172,7 @@ type Group interface {
     Keys() []string
     Clear() error
     Count() int
+    Has(key string) bool
 }
 ```
 
