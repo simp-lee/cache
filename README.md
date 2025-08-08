@@ -121,6 +121,12 @@ type CacheInterface interface {
     // Delete removes a value from the cache
     Delete(key string) error
     
+    // DeleteKeys deletes the specified keys in batch and returns the number of keys actually deleted
+    DeleteKeys(keys []string) int
+    
+    // DeletePrefix deletes all keys with the given prefix and returns the number of keys actually deleted
+    DeletePrefix(prefix string) int
+    
     // GetOrSet returns existing value or sets and returns new value
     GetOrSet(key string, value interface{}) interface{}
     
@@ -167,6 +173,8 @@ type Group interface {
     GetOrSet(key string, value interface{}) interface{}
     GetOrSetFunc(key string, f func() interface{}) interface{}
     GetOrSetFuncWithExpiration(key string, f func() interface{}, expiration time.Duration) interface{}
+    DeleteKeys(keys []string) int
+    DeletePrefix(prefix string) int
     
     // Group management
     Keys() []string
@@ -254,6 +262,12 @@ value = users.GetOrSetFunc("4", func() interface{} {
 
 // Clear the group
 users.Clear()
+
+// Batch deletions
+// Delete keys by group prefix (recommended)
+deleted := users.DeletePrefix("session:")
+// Delete specific keys
+deleted = users.DeleteKeys([]string{"1", "2"})
 ```
 
 #### 4. Type-Safe Get Operations

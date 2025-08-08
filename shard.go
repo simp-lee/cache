@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -191,6 +192,80 @@ func (cs *cacheShard) delete(key string) error {
 	}
 	cs.mu.Unlock()
 	return nil
+}
+
+// deletePrefix deletes all keys with the given prefix in this shard and returns the number of deleted keys.
+func (cs *cacheShard) deletePrefix(prefix string) int {
+	if prefix == "" {
+		// Avoid accidental mass deletion; use Clear() explicitly for full wipe
+		return 0
+	}
+	// Collect matching keys under read lock
+	cs.mu.RLock()
+	keys := make([]string, 0)
+	for k := range cs.items {
+		if strings.HasPrefix(k, prefix) {
+			keys = append(keys, k)
+		}
+	}
+	cs.mu.RUnlock()
+
+	// Delete outside of read lock to minimize blocking
+	for _, k := range keys {
+		cs.delete(k)
+	}
+
+	// Trigger persistence threshold if configured
+	if n := len(keys); n > 0 && cs.persistPath != "" {
+		count := atomic.AddInt32(&cs.modifyCount, int32(n))
+		if count >= int32(cs.persistThreshold) {
+			select {
+			case cs.persistChan <- struct{}{}:
+			default:
+			}
+		}
+	}
+
+	return len(keys)
+}
+
+// deleteKeys deletes specified keys that belong to this shard and returns the number of actually deleted keys.
+func (cs *cacheShard) deleteKeys(keys []string) int {
+	if len(keys) == 0 {
+		return 0
+	}
+
+	// Deduplicate keys first
+	keySet := make(map[string]struct{})
+	for _, k := range keys {
+		keySet[k] = struct{}{}
+	}
+
+	// Check existence under read lock to count accurately
+	existing := make([]string, 0, len(keySet))
+	cs.mu.RLock()
+	for k := range keySet {
+		if cs.items[k] != nil {
+			existing = append(existing, k)
+		}
+	}
+	cs.mu.RUnlock()
+
+	for _, k := range existing {
+		cs.delete(k)
+	}
+
+	if n := len(existing); n > 0 && cs.persistPath != "" {
+		count := atomic.AddInt32(&cs.modifyCount, int32(n))
+		if count >= int32(cs.persistThreshold) {
+			select {
+			case cs.persistChan <- struct{}{}:
+			default:
+			}
+		}
+	}
+
+	return len(existing)
 }
 
 func (cs *cacheShard) evictOne() {

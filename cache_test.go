@@ -592,6 +592,30 @@ func TestCacheBasicOperations(t *testing.T) {
 			t.Errorf("Expected count 2, got %d", count)
 		}
 	})
+
+	t.Run("DeletePrefix and DeleteKeys", func(t *testing.T) {
+		c.Clear()
+		c.Set("pre:1", 1)
+		c.Set("pre:2", 2)
+		c.Set("other", 3)
+
+		if n := c.DeletePrefix("pre:"); n != 2 {
+			t.Fatalf("expected delete 2 by prefix, got %d", n)
+		}
+		if c.Has("pre:1") || c.Has("pre:2") {
+			t.Fatal("prefix deleted keys should not exist")
+		}
+		if !c.Has("other") {
+			t.Fatal("other should remain")
+		}
+
+		if n := c.DeleteKeys([]string{"other", "missing"}); n != 1 {
+			t.Fatalf("expected delete 1 by keys, got %d", n)
+		}
+		if c.Has("other") {
+			t.Fatal("other should be deleted")
+		}
+	})
 }
 
 func TestCacheExpiration(t *testing.T) {

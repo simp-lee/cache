@@ -12,6 +12,8 @@ type CacheInterface interface {
 	Get(key string) (interface{}, bool)
 	GetWithExpiration(key string) (interface{}, *time.Time, bool)
 	Delete(key string) error
+	DeleteKeys(keys []string) int
+	DeletePrefix(prefix string) int
 	GetOrSet(key string, value interface{}) interface{}
 	GetOrSetFunc(key string, f func() interface{}) interface{}
 	GetOrSetFuncWithExpiration(key string, f func() interface{}, expiration time.Duration) interface{}

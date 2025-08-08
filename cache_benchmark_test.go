@@ -591,4 +591,43 @@ func BenchmarkCacheGroup(b *testing.B) {
 			}
 		})
 	})
+
+	b.Run("GroupDeletePrefix", func(b *testing.B) {
+		// Setup data for each iteration
+		b.StopTimer()
+		for i := 0; i < b.N; i++ {
+			prefix := fmt.Sprintf("bench_%d:", i)
+			for j := 0; j < 100; j++ {
+				users.Set(prefix+fmt.Sprintf("key%d", j), j)
+			}
+		}
+		b.StartTimer()
+
+		for i := 0; i < b.N; i++ {
+			prefix := fmt.Sprintf("bench_%d:", i)
+			users.DeletePrefix(prefix)
+		}
+	})
+
+	b.Run("GroupDeleteKeys", func(b *testing.B) {
+		// Setup data for each iteration
+		b.StopTimer()
+		for i := 0; i < b.N; i++ {
+			keys := make([]string, 100)
+			for j := 0; j < 100; j++ {
+				key := fmt.Sprintf("batch_%d_key%d", i, j)
+				keys[j] = key
+				users.Set(key, j)
+			}
+		}
+		b.StartTimer()
+
+		for i := 0; i < b.N; i++ {
+			keys := make([]string, 100)
+			for j := 0; j < 100; j++ {
+				keys[j] = fmt.Sprintf("batch_%d_key%d", i, j)
+			}
+			users.DeleteKeys(keys)
+		}
+	})
 }

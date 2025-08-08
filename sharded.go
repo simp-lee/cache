@@ -122,6 +122,57 @@ func (sc *ShardedCache) Delete(key string) error {
 	return sc.getShard(key).delete(key)
 }
 
+// DeleteKeys implements CacheInterface
+func (sc *ShardedCache) DeleteKeys(keys []string) int {
+	if len(keys) == 0 {
+		return 0
+	}
+
+	// Group keys by shard to minimize lock contention
+	buckets := make(map[uint64][]string)
+	for _, k := range keys {
+		h := xxhash.Sum64String(k)
+		idx := h & sc.shardMask
+		buckets[idx] = append(buckets[idx], k)
+	}
+
+	var wg sync.WaitGroup
+	var total uint64
+
+	for idx, list := range buckets {
+		shard := sc.shards[idx]
+		wg.Add(1)
+		go func(s *cacheShard, ks []string) {
+			defer wg.Done()
+			n := s.deleteKeys(ks)
+			atomic.AddUint64(&total, uint64(n))
+		}(shard, list)
+	}
+	wg.Wait()
+	return int(total)
+}
+
+// DeletePrefix implements CacheInterface
+func (sc *ShardedCache) DeletePrefix(prefix string) int {
+	if prefix == "" {
+		// Avoid accidental mass deletion; use Clear() for full wipe
+		return 0
+	}
+
+	var wg sync.WaitGroup
+	var total uint64
+	for _, shard := range sc.shards {
+		wg.Add(1)
+		go func(s *cacheShard) {
+			defer wg.Done()
+			n := s.deletePrefix(prefix)
+			atomic.AddUint64(&total, uint64(n))
+		}(shard)
+	}
+	wg.Wait()
+	return int(total)
+}
+
 // GetOrSet implements CacheInterface
 func (sc *ShardedCache) GetOrSet(key string, value interface{}) interface{} {
 	if val, exists := sc.Get(key); exists {

@@ -10,6 +10,10 @@ type Group interface {
 	GetWithExpiration(key string) (interface{}, *time.Time, bool)
 	Delete(key string) error
 
+	// Batch delete operations
+	DeleteKeys(keys []string) int
+	DeletePrefix(prefix string) int
+
 	// Utility operations
 	GetOrSet(key string, value interface{}) interface{}
 	GetOrSetFunc(key string, f func() interface{}) interface{}
@@ -53,6 +57,26 @@ func (g *cacheGroup) GetWithExpiration(key string) (interface{}, *time.Time, boo
 
 func (g *cacheGroup) Delete(key string) error {
 	return g.cache.Delete(g.buildKey(key))
+}
+
+func (g *cacheGroup) DeleteKeys(keys []string) int {
+	if len(keys) == 0 {
+		return 0
+	}
+	// Build fully-qualified keys with group prefix
+	fq := make([]string, 0, len(keys))
+	for _, k := range keys {
+		fq = append(fq, g.buildKey(k))
+	}
+	return g.cache.DeleteKeys(fq)
+}
+
+func (g *cacheGroup) DeletePrefix(prefix string) int {
+	if prefix == "" {
+		// Avoid accidental mass deletion; group-level full clear is Clear()
+		return 0
+	}
+	return g.cache.DeletePrefix(g.buildKey(prefix))
 }
 
 func (g *cacheGroup) GetOrSet(key string, value interface{}) interface{} {

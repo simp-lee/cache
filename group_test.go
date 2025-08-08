@@ -73,6 +73,42 @@ func TestCacheGroup(t *testing.T) {
 			t.Error("Value should have expired")
 		}
 	})
+
+	t.Run("Group DeletePrefix and DeleteKeys", func(t *testing.T) {
+		users := cache.Group("users")
+		// fill keys
+		users.Set("a:1", 1)
+		users.Set("a:2", 2)
+		users.Set("b:1", 3)
+		users.Set("c", 4)
+
+		// Delete by prefix
+		n := users.DeletePrefix("a:")
+		if n != 2 {
+			t.Fatalf("expected delete 2 by prefix, got %d", n)
+		}
+		if users.Has("a:1") || users.Has("a:2") {
+			t.Fatal("prefix deleted keys should not exist")
+		}
+		if !users.Has("b:1") || !users.Has("c") {
+			t.Fatal("other keys should remain")
+		}
+
+		// Delete by keys
+		n = users.DeleteKeys([]string{"b:1", "not-exist"})
+		if n != 1 {
+			t.Fatalf("expected delete 1 by keys, got %d", n)
+		}
+		if users.Has("b:1") {
+			t.Fatal("b:1 should be deleted")
+		}
+		if !users.Has("c") {
+			t.Fatal("c should remain")
+		}
+
+		// cleanup
+		users.Clear()
+	})
 }
 
 func TestCacheGroupSeparator(t *testing.T) {
