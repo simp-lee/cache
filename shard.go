@@ -305,8 +305,13 @@ func (cs *cacheShard) startCleaner(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		cs.deleteExpired()
+	for {
+		select {
+		case <-ticker.C:
+			cs.deleteExpired()
+		case <-cs.stopChan:
+			return
+		}
 	}
 }
 
