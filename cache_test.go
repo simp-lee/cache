@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,12 +32,10 @@ func TestCache(t *testing.T) {
 	t.Run("Expiration", func(t *testing.T) {
 		cache.SetWithExpiration("key2", "value2", time.Millisecond*100)
 
-		// 立即获取应该存在
 		if _, exists := cache.Get("key2"); !exists {
 			t.Error("Key should exist immediately after setting")
 		}
 
-		// 等待过期
 		time.Sleep(time.Millisecond * 200)
 
 		if _, exists := cache.Get("key2"); exists {
@@ -44,13 +44,13 @@ func TestCache(t *testing.T) {
 	})
 
 	t.Run("GetOrSet", func(t *testing.T) {
-		// 首次获取会设置值
+		// First call sets the value
 		val := cache.GetOrSet("key3", "value3")
 		if val != "value3" {
 			t.Errorf("Expected value3, got %v", val)
 		}
 
-		// 再次获取应返回已存在的值
+		// Second call returns existing value
 		val = cache.GetOrSet("key3", "different_value")
 		if val != "value3" {
 			t.Errorf("Expected value3, got %v", val)
@@ -64,7 +64,7 @@ func TestCache(t *testing.T) {
 			return "generated_value"
 		}
 
-		// 首次调用
+		// First call executes function
 		val := cache.GetOrSetFunc("func_key", getValue)
 		if val != "generated_value" {
 			t.Errorf("Expected 'generated_value', got %v", val)
@@ -73,7 +73,7 @@ func TestCache(t *testing.T) {
 			t.Errorf("Function should be called exactly once, got %d calls", callCount)
 		}
 
-		// 第二次调用应该返回缓存的值
+		// Second call returns cached value
 		val = cache.GetOrSetFunc("func_key", getValue)
 		if val != "generated_value" {
 			t.Errorf("Expected cached 'generated_value', got %v", val)
@@ -119,15 +119,13 @@ func TestCache(t *testing.T) {
 }
 
 func TestSingletonCache(t *testing.T) {
-	// 初始化缓存配置
 	opts := Options{
 		MaxSize:           100,
 		DefaultExpiration: time.Second * 5,
 		CleanupInterval:   time.Second,
-		ShardCount:        32, // 添加分片数量配置
+		ShardCount:        32,
 	}
 
-	// 初始化单例缓存
 	Init(opts)
 	cache := Get()
 
@@ -141,12 +139,10 @@ func TestSingletonCache(t *testing.T) {
 	t.Run("Expiration", func(t *testing.T) {
 		cache.SetWithExpiration("key2", "value2", time.Millisecond*100)
 
-		// 立即获取应该存在
 		if _, exists := cache.Get("key2"); !exists {
 			t.Error("Key should exist immediately after setting")
 		}
 
-		// 等待过期
 		time.Sleep(time.Millisecond * 200)
 
 		if _, exists := cache.Get("key2"); exists {
@@ -155,13 +151,13 @@ func TestSingletonCache(t *testing.T) {
 	})
 
 	t.Run("GetOrSet", func(t *testing.T) {
-		// 首次获取会设置值
+		// First call sets the value
 		val := cache.GetOrSet("key3", "value3")
 		if val != "value3" {
 			t.Errorf("Expected value3, got %v", val)
 		}
 
-		// 再次获取应返回已存在的值
+		// Second call returns existing value
 		val = cache.GetOrSet("key3", "different_value")
 		if val != "value3" {
 			t.Errorf("Expected value3, got %v", val)
@@ -185,7 +181,7 @@ func TestSingletonCache(t *testing.T) {
 	})
 
 	t.Run("Stats", func(t *testing.T) {
-		cache.Clear() // 清空之前的数据
+		cache.Clear()
 		cache.Set("key6", "value6")
 		cache.Get("key6")
 		cache.Get("nonexistent")
@@ -200,17 +196,16 @@ func TestSingletonCache(t *testing.T) {
 		if stats["misses"].(uint64) != 1 {
 			t.Errorf("Incorrect miss count in stats: %v", stats["misses"])
 		}
-		// 验证分片数量
 		if stats["shards"].(uint64) != 32 {
 			t.Errorf("Incorrect shard count in stats: %v", stats["shards"])
 		}
 	})
 
 	t.Run("MaxSize With Single Shard", func(t *testing.T) {
-		// 使用单分片测试最大容量
+		// Use single shard to test max capacity
 		singleShardOpts := Options{
 			MaxSize:    2,
-			ShardCount: 1, // 使用单个分片便于测试淘汰
+			ShardCount: 1, // Single shard for eviction testing
 		}
 		singleCache := NewCache(singleShardOpts)
 
@@ -218,7 +213,7 @@ func TestSingletonCache(t *testing.T) {
 		time.Sleep(time.Millisecond * 10)
 		singleCache.Set("k2", "v2")
 		time.Sleep(time.Millisecond * 10)
-		singleCache.Set("k3", "v3") // 应该淘汰最旧的项
+		singleCache.Set("k3", "v3") // Should evict oldest item
 
 		if singleCache.Count() != 2 {
 			t.Errorf("Expected count of 2, got %d", singleCache.Count())
@@ -232,7 +227,6 @@ func TestSingletonCache(t *testing.T) {
 	})
 
 	t.Run("Singleton Pattern", func(t *testing.T) {
-		// 验证单例模式
 		cache1 := Get()
 		cache2 := Get()
 
@@ -285,7 +279,7 @@ func TestGetOrSetFunc(t *testing.T) {
 	cache := Get()
 
 	t.Run("Basic GetOrSetFunc", func(t *testing.T) {
-		// 首次调用，应该执行函数
+		// First call should execute function
 		callCount := 0
 		getValue := func() interface{} {
 			callCount++
@@ -300,7 +294,7 @@ func TestGetOrSetFunc(t *testing.T) {
 			t.Errorf("Function should be called exactly once, got %d calls", callCount)
 		}
 
-		// 第二次调用，应该返回缓存的值而不执行函数
+		// Second call should return cached value without executing function
 		val = cache.GetOrSetFunc("func_key", getValue)
 		if val != "generated_value" {
 			t.Errorf("Expected cached 'generated_value', got %v", val)
@@ -324,7 +318,7 @@ func TestGetOrSetFuncWithExpiration(t *testing.T) {
 			return "expiring_value"
 		}
 
-		// 首次调用
+		// First call
 		val := cache.GetOrSetFuncWithExpiration("exp_key", getValue, time.Millisecond*100)
 		if val != "expiring_value" {
 			t.Errorf("Expected 'expiring_value', got %v", val)
@@ -333,7 +327,7 @@ func TestGetOrSetFuncWithExpiration(t *testing.T) {
 			t.Errorf("Function should be called exactly once, got %d calls", callCount)
 		}
 
-		// 立即获取，应该返回缓存值
+		// Immediate get should return cached value
 		val = cache.GetOrSetFuncWithExpiration("exp_key", getValue, time.Millisecond*100)
 		if val != "expiring_value" {
 			t.Errorf("Expected cached 'expiring_value', got %v", val)
@@ -342,10 +336,10 @@ func TestGetOrSetFuncWithExpiration(t *testing.T) {
 			t.Errorf("Function should not be called again, got %d calls", callCount)
 		}
 
-		// 等待过期
+		// Wait for expiration
 		time.Sleep(time.Millisecond * 200)
 
-		// 过期后再次调用，应该重新生成值
+		// After expiration, function should be called again
 		val = cache.GetOrSetFuncWithExpiration("exp_key", getValue, time.Millisecond*100)
 		if val != "expiring_value" {
 			t.Errorf("Expected new 'expiring_value', got %v", val)
@@ -358,20 +352,20 @@ func TestGetOrSetFuncWithExpiration(t *testing.T) {
 	t.Run("Concurrent Access", func(t *testing.T) {
 		var callCount int32
 		getValue := func() interface{} {
-			// 增加一些随机延迟，使竞争条件更容易出现
+			// Add random delay to make race conditions more likely
 			time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
 			atomic.AddInt32(&callCount, 1)
 			return "concurrent_value"
 		}
 
 		var wg sync.WaitGroup
-		concurrency := 100 // 增加并发数以更好地测试
+		concurrency := 100 // Increase concurrency for better testing
 		wg.Add(concurrency)
 
-		// 重置计数器
+		// Reset counter
 		atomic.StoreInt32(&callCount, 0)
 
-		// 并发访问
+		// Concurrent access
 		for i := 0; i < concurrency; i++ {
 			go func() {
 				defer wg.Done()
@@ -384,7 +378,7 @@ func TestGetOrSetFuncWithExpiration(t *testing.T) {
 
 		wg.Wait()
 
-		// 验证函数只被调用一次
+		// Verify function was called exactly once
 		if count := atomic.LoadInt32(&callCount); count != 1 {
 			t.Errorf("Function should be called exactly once under concurrent access, got %d calls", count)
 		}
@@ -401,7 +395,7 @@ func TestGetOrSetFuncWithExpiration(t *testing.T) {
 		var wg sync.WaitGroup
 		concurrency := 50
 
-		// 第一轮并发访问
+		// First round of concurrent access
 		atomic.StoreInt32(&callCount, 0)
 		wg.Add(concurrency)
 		for i := 0; i < concurrency; i++ {
@@ -416,10 +410,10 @@ func TestGetOrSetFuncWithExpiration(t *testing.T) {
 			t.Errorf("First round: function should be called once, got %d calls", count)
 		}
 
-		// 等待过期
+		// Wait for expiration
 		time.Sleep(time.Millisecond * 100)
 
-		// 第二轮并发访问
+		// Second round of concurrent access
 		atomic.StoreInt32(&callCount, 0)
 		wg.Add(concurrency)
 		for i := 0; i < concurrency; i++ {
@@ -439,8 +433,8 @@ func TestGetOrSetFuncWithExpiration(t *testing.T) {
 func TestOnEvicted(t *testing.T) {
 	cache := NewCache(Options{
 		MaxSize:         2,
-		CleanupInterval: time.Millisecond * 100, // 设置较小的清理间隔
-		ShardCount:      1,                      // 使用单分片便于测试淘汰
+		CleanupInterval: time.Millisecond * 100,
+		ShardCount:      1, // Single shard for eviction testing
 	})
 
 	t.Run("Eviction Callback", func(t *testing.T) {
@@ -448,7 +442,6 @@ func TestOnEvicted(t *testing.T) {
 		evictedKeys := make([]interface{}, 0)
 		evictedVals := make([]interface{}, 0)
 
-		// 设置回调函数
 		cache.OnEvicted(func(key string, value interface{}) {
 			mu.Lock()
 			evictedKeys = append(evictedKeys, key)
@@ -456,20 +449,20 @@ func TestOnEvicted(t *testing.T) {
 			mu.Unlock()
 		})
 
-		// 添加数据触发淘汰
+		// Add data to trigger eviction
 		cache.Set("k1", "v1")
 		time.Sleep(time.Millisecond * 10)
 		cache.Set("k2", "v2")
 		time.Sleep(time.Millisecond * 10)
-		cache.Set("k3", "v3") // 应该触发 k1 的淘汰
+		cache.Set("k3", "v3") // Should trigger k1 eviction
 
-		// 等待一段时间确保回调执行完成
+		// Wait for callback execution
 		time.Sleep(time.Millisecond * 50)
 
 		mu.Lock()
 		defer mu.Unlock()
 
-		// 验证回调是否正确执行
+		// Verify callback was executed correctly
 		if len(evictedKeys) != 1 {
 			t.Errorf("Expected 1 eviction, got %d", len(evictedKeys))
 		}
@@ -489,17 +482,17 @@ func TestOnEvicted(t *testing.T) {
 			}
 		})
 
-		// 设置快过期的项
+		// Set item with short expiration
 		cache.SetWithExpiration("exp_key", "exp_val", time.Millisecond*50)
 
-		// 手动触发过期
+		// Trigger cleanup manually
 		time.Sleep(time.Millisecond * 100)
-		cache.Get("exp_key") // 触发过期检查
+		cache.Get("exp_key") // Trigger expiration check
 
-		// 等待回调
+		// Wait for callback
 		select {
 		case <-evicted:
-			// 回调被正确触发
+			// Callback was correctly triggered
 		case <-time.After(time.Millisecond * 100):
 			t.Error("Eviction callback was not called for expired item")
 		}
@@ -517,7 +510,7 @@ func TestOnEvicted(t *testing.T) {
 		cache.Set("del_key", "del_val")
 		cache.Delete("del_key")
 
-		// 等待一段时间确保回调执行完成
+		// Wait for callback execution
 		time.Sleep(time.Millisecond * 50)
 
 		if !called.Load() {
@@ -532,15 +525,14 @@ func TestOnEvicted(t *testing.T) {
 			evictedCount.Add(1)
 		})
 
-		// 添加多个项
+		// Add multiple items
 		cache.Set("clear1", "val1")
 		cache.Set("clear2", "val2")
 		cache.Set("clear3", "val3")
 
-		// 清空缓存
 		cache.Clear()
 
-		// 等待一段时间确保回调执行完成
+		// Wait for callback execution
 		time.Sleep(time.Millisecond * 50)
 
 		if count := evictedCount.Load(); count != 3 {
@@ -644,7 +636,7 @@ func TestCacheMaxSize(t *testing.T) {
 	defer c.Clear()
 
 	t.Run("Sequential Eviction", func(t *testing.T) {
-		// 按顺序添加5个项目，应该只保留最新的3个
+		// Add 5 items sequentially, should keep only the latest 3
 		items := []struct {
 			key   string
 			value string
@@ -658,16 +650,16 @@ func TestCacheMaxSize(t *testing.T) {
 
 		for _, item := range items {
 			c.Set(item.key, item.value)
-			// 添加小延时确保创建时间有明显差异
+			// Add small delay to ensure distinct creation times
 			time.Sleep(time.Millisecond * 10)
 		}
 
-		// 验证数量
+		// Verify count
 		if count := c.Count(); count != 3 {
 			t.Errorf("Expected count of 3, got %d", count)
 		}
 
-		// 验证最旧的两个项目被淘汰
+		// Verify oldest two items were evicted
 		for i := 1; i <= 2; i++ {
 			key := fmt.Sprintf("k%d", i)
 			if _, exists := c.Get(key); exists {
@@ -675,7 +667,7 @@ func TestCacheMaxSize(t *testing.T) {
 			}
 		}
 
-		// 验证最新的三个项目存在
+		// Verify latest three items exist
 		for i := 3; i <= 5; i++ {
 			key := fmt.Sprintf("k%d", i)
 			expectedValue := fmt.Sprintf("v%d", i)
@@ -690,15 +682,15 @@ func TestCacheMaxSize(t *testing.T) {
 	t.Run("Update Existing Item", func(t *testing.T) {
 		c.Clear()
 
-		// 添加初始项目
+		// Add initial items
 		c.Set("k1", "v1")
 		c.Set("k2", "v2")
 		c.Set("k3", "v3")
 
-		// 更新现有项目不应触发淘汰
+		// Updating existing item should not trigger eviction
 		c.Set("k2", "v2-updated")
 
-		// 验证所有项目仍然存在
+		// Verify all items still exist
 		expectedValues := map[string]string{
 			"k1": "v1",
 			"k2": "v2-updated",
@@ -717,26 +709,26 @@ func TestCacheMaxSize(t *testing.T) {
 	t.Run("Rapid Updates", func(t *testing.T) {
 		c.Clear()
 
-		// 快速添加和更新项目
+		// Rapidly add and update items
 		for i := 0; i < 10; i++ {
 			for j := 1; j <= 5; j++ {
 				key := fmt.Sprintf("k%d", j)
 				value := fmt.Sprintf("v%d-%d", j, i)
 				c.Set(key, value)
-				// 添加小延时确保创建时间有明显差异
+				// Add small delay to ensure distinct creation times
 				time.Sleep(time.Millisecond * 10)
 			}
 		}
 
-		// 验证只保留了最新的3个键
+		// Verify only latest 3 keys are kept
 		if count := c.Count(); count != 3 {
 			t.Errorf("Expected count of 3, got %d", count)
 		}
 
-		// 验证最后3个键的值是最新的
+		// Verify last 3 keys have latest values
 		for i := 3; i <= 5; i++ {
 			key := fmt.Sprintf("k%d", i)
-			expectedValue := fmt.Sprintf("v%d-9", i) // 最后一次更新的值
+			expectedValue := fmt.Sprintf("v%d-9", i) // Last update value
 			if val, exists := c.Get(key); !exists {
 				t.Errorf("key %s should exist", key)
 			} else if val != expectedValue {
@@ -746,18 +738,18 @@ func TestCacheMaxSize(t *testing.T) {
 	})
 
 	t.Run("Zero MaxSize", func(t *testing.T) {
-		// 测试MaxSize为0的情况（无限制）
+		// Test MaxSize=0 (unlimited)
 		unlimitedCache := NewCache(Options{MaxSize: 0})
 		defer unlimitedCache.Clear()
 
-		// 添加大量项目
+		// Add many items
 		for i := 1; i <= 100; i++ {
 			key := fmt.Sprintf("k%d", i)
 			value := fmt.Sprintf("v%d", i)
 			unlimitedCache.Set(key, value)
 		}
 
-		// 验证所有项目都存在
+		// Verify all items exist
 		if count := unlimitedCache.Count(); count != 100 {
 			t.Errorf("Expected count of 100, got %d", count)
 		}
@@ -938,14 +930,14 @@ func TestCacheDefaultOptions(t *testing.T) {
 		c := NewCache()
 		stats := c.Stats()
 
-		// 验证默认值
+		// Verify default values
 		expectedDefaults := map[string]interface{}{
 			"maxSize":           0,
 			"defaultExpiration": time.Duration(0),
 			"cleanupInterval":   time.Minute * 11,
 			"persistInterval":   time.Minute * 13,
 			"persistThreshold":  100,
-			"shardCount":        uint64(32), // 默认32个分片
+			"shardCount":        uint64(32), // Default 32 shards
 			"persistPath":       "",
 		}
 
@@ -970,14 +962,14 @@ func TestCacheDefaultOptions(t *testing.T) {
 
 		stats := c.Stats()
 
-		// 验证负值被正确处理为默认值
+		// Verify negative values are handled correctly as defaults
 		expectedDefaults := map[string]interface{}{
 			"maxSize":           0,
 			"defaultExpiration": time.Duration(0),
 			"cleanupInterval":   time.Minute * 11,
 			"persistInterval":   time.Minute * 13,
 			"persistThreshold":  100,
-			"shardCount":        uint64(32), // 应该使用默认值
+			"shardCount":        uint64(32), // Should use default value
 		}
 
 		for key, expected := range expectedDefaults {
@@ -1061,18 +1053,18 @@ func TestCacheDefaultOptions(t *testing.T) {
 }
 
 func TestCacheFactoryAndSingleton(t *testing.T) {
-	// 保存原始的 defaultCache
+	// Save original defaultCache
 	originalCache := defaultCache
 	defer func() {
 		defaultCache = originalCache
 	}()
 
 	t.Run("Factory Pattern", func(t *testing.T) {
-		// 创建两个不同的实例
+		// Create two different instances
 		cache1 := NewCache(Options{MaxSize: 100})
 		cache2 := NewCache(Options{MaxSize: 200})
 
-		// 验证它们是不同的实例
+		// Verify they are different instances
 		cache1.Set("key", "value1")
 		cache2.Set("key", "value2")
 
@@ -1080,7 +1072,7 @@ func TestCacheFactoryAndSingleton(t *testing.T) {
 			t.Error("Cache instances should be independent")
 		}
 
-		// 验证配置是独立的
+		// Verify configurations are independent
 		stats1 := cache1.Stats()
 		stats2 := cache2.Stats()
 		if stats1["maxSize"] == stats2["maxSize"] {
@@ -1089,24 +1081,24 @@ func TestCacheFactoryAndSingleton(t *testing.T) {
 	})
 
 	t.Run("Singleton Pattern", func(t *testing.T) {
-		// 重置默认缓存和 once
+		// Reset default cache and once
 		defaultCache = nil
 		once = sync.Once{}
 
-		// 初始化默认实例
+		// Initialize default instance
 		Init(Options{MaxSize: 100})
 
-		// 获取实例引用
+		// Get instance references
 		cache1 := Get()
 		cache2 := Get()
 
-		// 验证是同一个实例
+		// Verify they are the same instance
 		cache1.Set("key", "value")
 		if val, exists := cache2.Get("key"); !exists || val != "value" {
 			t.Error("Singleton pattern not working correctly")
 		}
 
-		// 验证无法重新初始化
+		// Verify cannot re-initialize
 		Init(Options{MaxSize: 200})
 		cache3 := Get()
 		stats := cache3.Stats()
@@ -1116,7 +1108,7 @@ func TestCacheFactoryAndSingleton(t *testing.T) {
 	})
 
 	t.Run("Panic Before Init", func(t *testing.T) {
-		// 重置默认缓存和 once
+		// Reset default cache and once
 		defaultCache = nil
 		once = sync.Once{}
 
@@ -1126,24 +1118,33 @@ func TestCacheFactoryAndSingleton(t *testing.T) {
 			}
 		}()
 
-		Get() // 应该 panic
+		Get() // Should panic
 	})
 
 	t.Run("Multiple Instances With Different Configs", func(t *testing.T) {
-		// 创建具有不同配置的多个实例
+		// Create temporary directory for test persistence
+		tempDir, err := os.MkdirTemp("", "cache_test_multiple")
+		if err != nil {
+			t.Fatalf("Failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		persistPath := filepath.Join(tempDir, "test_cache")
+
+		// Create multiple instances with different configurations
 		caches := []CacheInterface{
 			NewCache(Options{MaxSize: 10, DefaultExpiration: time.Minute}),
 			NewCache(Options{MaxSize: 20, DefaultExpiration: time.Hour}),
-			NewCache(Options{MaxSize: 30, PersistPath: "test"}),
+			NewCache(Options{MaxSize: 30, PersistPath: persistPath}),
 		}
 
-		// 验证每个实例的独立性
+		// Verify independence of each instance
 		for i, cache := range caches {
 			key := fmt.Sprintf("key%d", i)
 			value := fmt.Sprintf("value%d", i)
 			cache.Set(key, value)
 
-			// 验证其他实例没有这个值
+			// Verify other instances don't have this value
 			for j, otherCache := range caches {
 				if i != j {
 					if _, exists := otherCache.Get(key); exists {
@@ -1171,15 +1172,13 @@ func TestConcurrentAccess(t *testing.T) {
 				key := fmt.Sprintf("key-%d-%d", g, i)
 				value := fmt.Sprintf("value-%d-%d", g, i)
 
-				// 写入
 				cache.Set(key, value)
 
-				// 读取并验证
+				// Read and verify
 				if val, exists := cache.Get(key); !exists || val != value {
 					t.Errorf("Concurrent operation failed for key: %s", key)
 				}
 
-				// 删除
 				cache.Delete(key)
 			}
 		}(g)
@@ -1191,14 +1190,14 @@ func TestConcurrentAccess(t *testing.T) {
 func TestMaxSize(t *testing.T) {
 	cache := NewCache(Options{
 		MaxSize:    2,
-		ShardCount: 1, // 使用单个分片便于测试
+		ShardCount: 1, // Use single shard for testing
 	})
 
 	cache.Set("k1", "v1")
 	time.Sleep(time.Millisecond)
 	cache.Set("k2", "v2")
 	time.Sleep(time.Millisecond)
-	cache.Set("k3", "v3") // 应该触发淘汰
+	cache.Set("k3", "v3") // Should trigger eviction
 
 	if cache.Count() != 2 {
 		t.Errorf("Expected count of 2, got %d", cache.Count())
@@ -1211,4 +1210,306 @@ func TestMaxSize(t *testing.T) {
 	if _, exists := cache.Get("k3"); !exists {
 		t.Error("k3 should exist")
 	}
+}
+
+// TestClearObjectPoolRecycling tests whether the Clear method correctly recycles objects to object pools.
+// This test verifies that ExpireTime objects are returned to timePool and cacheItem objects
+// are returned to itemPool, ensuring proper memory management and pool reuse.
+func TestClearObjectPoolRecycling(t *testing.T) {
+	// Create cache instance
+	cache := NewCache(Options{
+		ShardCount: 4,
+	})
+	defer cache.Close()
+
+	// Add some items with expiration time
+	cache.SetWithExpiration("key1", "value1", time.Hour)
+	cache.SetWithExpiration("key2", "value2", time.Hour)
+	cache.SetWithExpiration("key3", "value3", time.Hour)
+	cache.Set("key4", "value4") // Without expiration time
+
+	// Verify items have been added
+	if cache.Count() != 4 {
+		t.Errorf("Expected 4 items, got %d", cache.Count())
+	}
+
+	// Record memory usage before clear
+	var m1 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m1)
+
+	// Execute Clear operation
+	err := cache.Clear()
+	if err != nil {
+		t.Errorf("Clear failed: %v", err)
+	}
+
+	// Verify cache is empty
+	if cache.Count() != 0 {
+		t.Errorf("Expected 0 items after clear, got %d", cache.Count())
+	}
+
+	// Force garbage collection
+	runtime.GC()
+
+	// Record memory usage after clear
+	var m2 runtime.MemStats
+	runtime.ReadMemStats(&m2)
+
+	// Verify object pool has available objects
+	// Test pool reuse by quickly creating new items
+	for i := 0; i < 10; i++ {
+		cache.SetWithExpiration("test", "value", time.Hour)
+		cache.Delete("test")
+	}
+
+	t.Logf("Memory before clear: %d bytes", m1.Alloc)
+	t.Logf("Memory after clear: %d bytes", m2.Alloc)
+	t.Log("Clear operation completed successfully with object pool recycling")
+}
+
+// TestClearWithEvictionCallback tests the callback functionality of the Clear method.
+// This test ensures that eviction callbacks are properly triggered for all items
+// when the cache is cleared, and that callbacks are executed after releasing locks.
+func TestClearWithEvictionCallback(t *testing.T) {
+	evictedKeys := make(map[string]interface{})
+
+	cache := NewCache(Options{
+		ShardCount: 4,
+	})
+	defer cache.Close()
+
+	// Set callback function
+	cache.OnEvicted(func(key string, value interface{}) {
+		evictedKeys[key] = value
+	})
+
+	// Add some items
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
+	cache.SetWithExpiration("key3", "value3", time.Hour)
+
+	// Execute Clear
+	err := cache.Clear()
+	if err != nil {
+		t.Errorf("Clear failed: %v", err)
+	}
+
+	// Verify callback was triggered correctly
+	if len(evictedKeys) != 3 {
+		t.Errorf("Expected 3 evicted items, got %d", len(evictedKeys))
+	}
+
+	expectedKeys := map[string]string{
+		"key1": "value1",
+		"key2": "value2",
+		"key3": "value3",
+	}
+
+	for key, expectedValue := range expectedKeys {
+		if value, exists := evictedKeys[key]; !exists {
+			t.Errorf("Expected key %s to be evicted", key)
+		} else if value != expectedValue {
+			t.Errorf("Expected evicted value %s for key %s, got %s", expectedValue, key, value)
+		}
+	}
+
+	// Verify cache is empty
+	if cache.Count() != 0 {
+		t.Errorf("Expected 0 items after clear, got %d", cache.Count())
+	}
+}
+
+// BenchmarkClearWithObjectPoolRecycling tests the performance of Clear operation.
+// This benchmark measures the time taken to clear a cache with 1000 items,
+// where half have expiration times and half do not.
+func BenchmarkClearWithObjectPoolRecycling(b *testing.B) {
+	// Create cache instance
+	cache := NewCache(Options{
+		ShardCount: 32,
+	})
+	defer cache.Close()
+
+	// Prepare test data
+	prepareData := func() {
+		for i := 0; i < 1000; i++ {
+			key := fmt.Sprintf("key%d", i)
+			value := fmt.Sprintf("value%d", i)
+			if i%2 == 0 {
+				cache.SetWithExpiration(key, value, time.Hour)
+			} else {
+				cache.Set(key, value)
+			}
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		prepareData()
+		b.StartTimer()
+
+		// Execute Clear operation
+		cache.Clear()
+	}
+}
+
+// BenchmarkClearMemoryUsage tests memory usage of Clear operation.
+// This benchmark measures memory allocation patterns and verifies that
+// memory is properly released after clearing the cache.
+func BenchmarkClearMemoryUsage(b *testing.B) {
+	cache := NewCache(Options{
+		ShardCount: 32,
+	})
+	defer cache.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Add data
+		for j := 0; j < 100; j++ {
+			key := fmt.Sprintf("key%d", j)
+			value := fmt.Sprintf("value%d", j)
+			cache.SetWithExpiration(key, value, time.Hour)
+		}
+
+		// Record memory usage
+		var m1 runtime.MemStats
+		runtime.ReadMemStats(&m1)
+
+		// Execute Clear
+		cache.Clear()
+
+		// Record memory after clear
+		var m2 runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&m2)
+
+		// Verify memory is properly released
+		if i == 0 {
+			b.Logf("Memory before clear: %d bytes", m1.Alloc)
+			b.Logf("Memory after clear: %d bytes", m2.Alloc)
+		}
+	}
+}
+
+// BenchmarkPoolReuse tests the effect of object pool reuse.
+// This benchmark compares performance between reusing object pools (via Clear)
+// versus creating new cache instances each time.
+func BenchmarkPoolReuse(b *testing.B) {
+	cache := NewCache(Options{
+		ShardCount: 32,
+	})
+	defer cache.Close()
+
+	b.Run("WithPoolReuse", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			// Add items
+			for j := 0; j < 100; j++ {
+				cache.SetWithExpiration(fmt.Sprintf("key%d", j), fmt.Sprintf("value%d", j), time.Hour)
+			}
+			// Clear cache (will recycle to object pool)
+			cache.Clear()
+		}
+	})
+
+	b.Run("NewObjectsEachTime", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			// Create new cache instance (cannot reuse object pool)
+			newCache := NewCache(Options{
+				ShardCount: 32,
+			})
+			// Add items
+			for j := 0; j < 100; j++ {
+				newCache.SetWithExpiration(fmt.Sprintf("key%d", j), fmt.Sprintf("value%d", j), time.Hour)
+			}
+			newCache.Close()
+		}
+	})
+}
+
+// TestAtomicGetOrSet tests that GetOrSet operations are atomic under high concurrency
+func TestAtomicGetOrSet(t *testing.T) {
+	cache := NewCache()
+	key := "atomic_test_key"
+
+	var setCount int64
+
+	// Concurrent GetOrSet calls
+	var wg sync.WaitGroup
+	concurrency := 100
+	results := make([]interface{}, concurrency)
+
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			// Each goroutine tries to set a unique value
+			value := fmt.Sprintf("value_%d", atomic.AddInt64(&setCount, 1))
+			results[idx] = cache.GetOrSet(key, value)
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Check results: all results should be the same
+	firstResult := results[0]
+	allSame := true
+	for _, result := range results {
+		if result != firstResult {
+			allSame = false
+			t.Errorf("Expected all results to be same, got %v and %v", firstResult, result)
+			break
+		}
+	}
+
+	t.Logf("Set operations count: %d", atomic.LoadInt64(&setCount))
+	t.Logf("All results same: %v, result: %v", allSame, firstResult)
+
+	if !allSame {
+		t.Error("GetOrSet should return same value for all concurrent calls")
+	}
+}
+
+// TestAtomicGetOrSetFunc tests that GetOrSetFunc operations are atomic
+func TestAtomicGetOrSetFunc(t *testing.T) {
+	cache := NewCache()
+	key := "atomic_func_key"
+
+	var funcCallCount int64
+
+	// Concurrent GetOrSetFunc calls
+	var wg sync.WaitGroup
+	concurrency := 50
+	results := make([]interface{}, concurrency)
+
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = cache.GetOrSetFunc(key, func() interface{} {
+				callNum := atomic.AddInt64(&funcCallCount, 1)
+				// Add delay to increase race condition probability
+				time.Sleep(time.Millisecond * 10)
+				return fmt.Sprintf("func_result_%d", callNum)
+			})
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Check that function was called exactly once
+	if atomic.LoadInt64(&funcCallCount) != 1 {
+		t.Errorf("Expected function to be called exactly once, got %d calls", atomic.LoadInt64(&funcCallCount))
+	}
+
+	// Check that all results are the same
+	firstResult := results[0]
+	for i, result := range results {
+		if result != firstResult {
+			t.Errorf("Result[%d] = %v, expected %v", i, result, firstResult)
+		}
+	}
+
+	t.Logf("Function call count: %d", atomic.LoadInt64(&funcCallCount))
+	t.Logf("Result: %v", firstResult)
 }

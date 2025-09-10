@@ -175,10 +175,19 @@ func (sc *ShardedCache) DeletePrefix(prefix string) int {
 
 // GetOrSet implements CacheInterface
 func (sc *ShardedCache) GetOrSet(key string, value interface{}) interface{} {
-	if val, exists := sc.Get(key); exists {
-		return val
+	shard := sc.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if item, found := shard.items[key]; found {
+		if item.ExpireTime == nil || time.Now().Before(*item.ExpireTime) {
+			atomic.AddUint64(&shard.hits, 1)
+			return item.Value
+		}
+		sc.deleteExpiredItemUnlocked(shard, key, item)
 	}
-	sc.Set(key, value)
+
+	shard.setWithExpirationUnlocked(key, value, sc.opts.DefaultExpiration)
 	return value
 }
 
@@ -206,6 +215,8 @@ func (sc *ShardedCache) GetOrSetFuncWithExpiration(key string, f func() interfac
 			atomic.AddUint64(&shard.hits, 1)
 			return item.Value
 		}
+		// Found expired item, explicitly delete it for consistent cleanup
+		sc.deleteExpiredItemUnlocked(shard, key, item)
 	}
 
 	// Call the function to get the value
@@ -300,15 +311,42 @@ func (sc *ShardedCache) Has(key string) bool {
 func (sc *ShardedCache) Clear() error {
 	for _, shard := range sc.shards {
 		shard.mu.Lock()
-		for key, item := range shard.items {
-			if shard.onEvicted != nil {
-				shard.onEvicted(key, item.Value)
-			}
-			delete(shard.items, key)
+		// First collect key/value pairs for eviction callback
+		var evictedItems []struct {
+			key   string
+			value any
 		}
+		if shard.onEvicted != nil {
+			evictedItems = make([]struct {
+				key   string
+				value any
+			}, 0, len(shard.items))
+			for key, item := range shard.items {
+				evictedItems = append(evictedItems, struct {
+					key   string
+					value any
+				}{key, item.Value})
+			}
+		}
+
+		// Recycle objects back to object pools
+		for _, item := range shard.items {
+			if item.ExpireTime != nil {
+				timePool.Put(item.ExpireTime)
+			}
+			itemPool.Put(item)
+		}
+
+		// Clear the map
+		shard.items = make(map[string]*cacheItem)
 		atomic.StoreUint64(&shard.hits, 0)
 		atomic.StoreUint64(&shard.misses, 0)
 		shard.mu.Unlock()
+
+		// Execute callbacks after releasing the lock to avoid holding lock during user callbacks
+		for _, evicted := range evictedItems {
+			shard.onEvicted(evicted.key, evicted.value)
+		}
 	}
 	return nil
 }
@@ -353,4 +391,16 @@ func nextPowerOf2(v uint64) uint64 {
 	v |= v >> 32 // Fix: Handle 64-bit values properly
 	v++
 	return v
+}
+
+// deleteExpiredItemUnlocked deletes an expired item from the shard without locking
+func (sc *ShardedCache) deleteExpiredItemUnlocked(shard *cacheShard, key string, item *cacheItem) {
+	if shard.onEvicted != nil {
+		shard.onEvicted(key, item.Value)
+	}
+	if item.ExpireTime != nil {
+		timePool.Put(item.ExpireTime)
+	}
+	itemPool.Put(item)
+	delete(shard.items, key)
 }

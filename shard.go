@@ -3,6 +3,7 @@ package shardedcache
 import (
 	"encoding/gob"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -63,7 +64,10 @@ func newCacheShard(opts Options, persistPath string) *cacheShard {
 	// Load persisted data
 	if persistPath != "" {
 		if err := cs.loadFromDisk(); err != nil {
-			log.Println("Failed to load cache from disk:", err)
+			// Only log non-EOF errors, as empty files are normal
+			if err != io.EOF && !strings.Contains(err.Error(), "unexpected EOF") {
+				log.Println("Failed to load cache from disk:", err)
+			}
 		}
 	}
 

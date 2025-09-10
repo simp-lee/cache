@@ -15,14 +15,14 @@ import (
 )
 
 func TestCachePersistence(t *testing.T) {
-	// 创建临时目录
+	// Create temporary directory
 	tempDir, err := os.MkdirTemp("", "cache_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	// 为不同的测试场景创建子目录
+	// Create subdirectories for different test scenarios
 	dirs := map[string]string{
 		"auto":       filepath.Join(tempDir, "auto"),
 		"threshold":  filepath.Join(tempDir, "threshold"),
@@ -34,14 +34,14 @@ func TestCachePersistence(t *testing.T) {
 		"corrupt":    filepath.Join(tempDir, "corrupt"),
 	}
 
-	// 创建所有需要的目录
+	// Create all required directories
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatalf("Failed to create directory %s: %v", dir, err)
 		}
 	}
 
-	// 添加验证函数
+	// Add verification function
 	verifyCache := func(t *testing.T, c CacheInterface, keyFormat, valueFormat string, count int) {
 		actualCount := 0
 		for i := 0; i < count; i++ {
@@ -67,15 +67,13 @@ func TestCachePersistence(t *testing.T) {
 		})
 		defer cache.Close()
 
-		// 写入数据
 		for i := 0; i < 10; i++ {
 			cache.Set(fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i))
 		}
 
-		// 等待自动持久化
+		// Wait for auto-persistence to complete
 		time.Sleep(300 * time.Millisecond)
 
-		// 创建新缓存实例验证数据
 		newCache := NewCache(Options{
 			PersistPath: dirs["auto"],
 			ShardCount:  2,
@@ -96,17 +94,17 @@ func TestCachePersistence(t *testing.T) {
 		})
 		defer cache.Close()
 
-		// 创建一个辅助函数来检查key会被分配到哪个分片
+		// Helper function to determine which shard a key belongs to
 		getShardIndex := func(key string) int {
 			hash := xxhash.Sum64String(key)
-			return int(hash & 1) // 因为 shardCount = 2，所以用 & 1
+			return int(hash & 1) // & 1 because shardCount = 2
 		}
 
-		// 为每个分片准备精确的数据量
+		// Prepare exact amount of data for each shard
 		shardData := make(map[int][]struct{ key, value string })
 		keyIndex := 0
 
-		// 确保每个分片正好有 threshold 个数据
+		// Ensure each shard has exactly threshold number of items
 		for shard := 0; shard < shardCount; shard++ {
 			shardData[shard] = make([]struct{ key, value string }, 0)
 			count := 0
@@ -123,7 +121,7 @@ func TestCachePersistence(t *testing.T) {
 			}
 		}
 
-		// 先写入 threshold-1 个数据
+		// Write threshold-1 items first
 		for shard := 0; shard < shardCount; shard++ {
 			for i := 0; i < threshold-1; i++ {
 				data := shardData[shard][i]
@@ -132,26 +130,24 @@ func TestCachePersistence(t *testing.T) {
 			}
 		}
 
-		// 验证文件不存在
+		// Verify no files exist before threshold is reached
 		time.Sleep(100 * time.Millisecond)
 		files, _ := os.ReadDir(dirs["threshold"])
 		if len(files) > 0 {
 			t.Error("No files should exist before threshold")
 		}
 
-		// 写入最后一个数据，应该正好触发持久化
+		// Write the final item to trigger persistence
 		for shard := 0; shard < shardCount; shard++ {
 			lastData := shardData[shard][threshold-1]
 			t.Logf("Writing final data to shard %d: key=%s, value=%s", shard, lastData.key, lastData.value)
 			cache.Set(lastData.key, lastData.value)
-			// 等待持久化完成
 			time.Sleep(100 * time.Millisecond)
 		}
 
-		// 等待持久化完成
 		time.Sleep(100 * time.Millisecond)
 
-		// 验证文件
+		// Verify persistence files
 		files, _ = os.ReadDir(dirs["threshold"])
 		datFiles := make(map[string]bool)
 		for _, f := range files {
@@ -165,7 +161,7 @@ func TestCachePersistence(t *testing.T) {
 			return
 		}
 
-		// 验证数据
+		// Verify data integrity
 		newCache := NewCache(Options{
 			PersistPath: dirs["threshold"],
 			ShardCount:  shardCount,
@@ -196,14 +192,12 @@ func TestCachePersistence(t *testing.T) {
 			PersistThreshold: 1000,
 		})
 
-		// 写入数据
 		for i := 0; i < 10; i++ {
 			cache.Set(fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i))
 		}
 
 		cache.Close()
 
-		// 验证数据
 		newCache := NewCache(Options{
 			PersistPath: dirs["close"],
 			ShardCount:  2,
@@ -222,25 +216,23 @@ func TestCachePersistence(t *testing.T) {
 		})
 		defer cache.Close()
 
-		// 写入包含过期时间的数据
 		cache.SetWithExpiration("expire1", "value1", 200*time.Millisecond)
 		cache.Set("persist1", "value2")
 
-		time.Sleep(300 * time.Millisecond) // 等待数据过期
+		time.Sleep(300 * time.Millisecond) // Wait for expiration
 
-		// 验证新实例
 		newCache := NewCache(Options{
 			PersistPath: dirs["expire"],
 			ShardCount:  2,
 		})
 		defer newCache.Close()
 
-		// 过期的键该不存在
+		// Expired key should not exist
 		if _, exists := newCache.Get("expire1"); exists {
 			t.Error("Expired key should not be loaded")
 		}
 
-		// 未过期的键应该存在
+		// Non-expired key should exist
 		if val, exists := newCache.Get("persist1"); !exists || val != "value2" {
 			t.Error("Non-expired key should be loaded")
 		}
@@ -255,15 +247,12 @@ func TestCachePersistence(t *testing.T) {
 		})
 		defer cache.Close()
 
-		// 写入初始数据
 		cache.Set("key1", "value1")
 		time.Sleep(150 * time.Millisecond)
 
-		// 更新数据
 		cache.Set("key1", "value1_updated")
 		time.Sleep(150 * time.Millisecond)
 
-		// 验证更新后的数据
 		newCache := NewCache(Options{
 			PersistPath: dirs["update"],
 			ShardCount:  2,
@@ -285,12 +274,11 @@ func TestCachePersistence(t *testing.T) {
 		defer cache.Close()
 
 		var wg sync.WaitGroup
-		// 并发写入和读取
+		// Concurrent read and write operations
 		for i := 0; i < 5; i++ {
 			wg.Add(2)
 			go func(id int) {
 				defer wg.Done()
-				// 写入操作
 				for j := 0; j < 20; j++ {
 					key := fmt.Sprintf("key%d-%d", id, j)
 					cache.Set(key, fmt.Sprintf("value%d-%d", id, j))
@@ -299,7 +287,6 @@ func TestCachePersistence(t *testing.T) {
 			}(i)
 			go func(id int) {
 				defer wg.Done()
-				// 读取操作
 				for j := 0; j < 20; j++ {
 					key := fmt.Sprintf("key%d-%d", id, j)
 					cache.Get(key)
@@ -308,16 +295,14 @@ func TestCachePersistence(t *testing.T) {
 			}(i)
 		}
 		wg.Wait()
-		time.Sleep(200 * time.Millisecond) // 等待最后的持久化完成
+		time.Sleep(200 * time.Millisecond) // Wait for final persistence
 
-		// 验证数据持久化
 		newCache := NewCache(Options{
 			PersistPath: dirs["concurrent"],
 			ShardCount:  2,
 		})
 		defer newCache.Close()
 
-		// 验证写入的数据
 		var count int
 		for i := 0; i < 5; i++ {
 			for j := 0; j < 20; j++ {
@@ -332,7 +317,7 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("RecoveryAfterCrash", func(t *testing.T) {
-		// 模拟崩溃前的写入
+		// Simulate pre-crash writes
 		cache := NewCache(Options{
 			PersistPath:      dirs["crash"],
 			PersistInterval:  50 * time.Millisecond,
@@ -343,12 +328,11 @@ func TestCachePersistence(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			cache.Set(fmt.Sprintf("crash-key%d", i), fmt.Sprintf("crash-value%d", i))
 		}
-		time.Sleep(100 * time.Millisecond) // 等待持久化
+		time.Sleep(100 * time.Millisecond) // Wait for persistence
 
-		// 模拟强制关闭（不调用 Close()）
+		// Simulate force shutdown (without calling Close())
 		// ...
 
-		// 验证恢复
 		newCache := NewCache(Options{
 			PersistPath: dirs["crash"],
 			ShardCount:  2,
@@ -359,20 +343,19 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("CorruptedFile", func(t *testing.T) {
-		// 创建损坏的持久化文件
+		// Create corrupted persistence file
 		corruptFile := filepath.Join(dirs["corrupt"], "0.dat")
 		if err := os.WriteFile(corruptFile, []byte("corrupted data"), 0644); err != nil {
 			t.Fatalf("Failed to create corrupted file: %v", err)
 		}
 
-		// 验证缓存能够正常初始化
 		cache := NewCache(Options{
 			PersistPath: dirs["corrupt"],
 			ShardCount:  2,
 		})
 		defer cache.Close()
 
-		// 写入新数据该正常工作
+		// Writing new data should work normally
 		cache.Set("new-key", "new-value")
 		if val, exists := cache.Get("new-key"); !exists || val != "new-value" {
 			t.Error("Cache should work normally after corrupted file")
@@ -380,7 +363,7 @@ func TestCachePersistence(t *testing.T) {
 	})
 
 	t.Run("FileCheck", func(t *testing.T) {
-		// 先关闭所有缓存实例确保文件写入
+		// Wait for all cache instances to close and files to be written
 		time.Sleep(200 * time.Millisecond)
 
 		for name, dir := range dirs {
@@ -394,7 +377,7 @@ func TestCachePersistence(t *testing.T) {
 			for _, f := range files {
 				if strings.HasSuffix(f.Name(), ".dat") {
 					datFiles++
-					// Windows 系统不需要检查文件权限
+					// Skip file permission check on Windows
 					if runtime.GOOS != "windows" {
 						info, err := f.Info()
 						if err != nil {
@@ -406,7 +389,7 @@ func TestCachePersistence(t *testing.T) {
 						}
 					}
 
-					// 验证文件可读性和非空
+					// Verify file is readable and non-empty
 					filePath := filepath.Join(dir, f.Name())
 					content, err := os.ReadFile(filePath)
 					if err != nil {
@@ -417,17 +400,17 @@ func TestCachePersistence(t *testing.T) {
 				}
 			}
 
-			// 特殊处理某些目录
+			// Special handling for certain directories
 			switch name {
-			case "corrupt": // corrupt 目录应该只有一个文件
+			case "corrupt": // corrupt directory should have only one file
 				if datFiles != 1 {
 					t.Errorf("Expected 1 .dat file in %s, got %d", name, datFiles)
 				}
-			case "update", "expire": // 这些目录可能只有一个活跃的分片
+			case "update", "expire": // these directories may have only one active shard
 				if datFiles < 1 {
 					t.Errorf("Expected at least 1 .dat file in %s, got %d", name, datFiles)
 				}
-			default: // 其他目录应该有两个分片文件
+			default: // other directories should have two shard files
 				if datFiles != 2 {
 					t.Errorf("Expected 2 .dat files in %s, got %d", name, datFiles)
 				}
@@ -437,7 +420,6 @@ func TestCachePersistence(t *testing.T) {
 }
 
 func TestCachePersistence1(t *testing.T) {
-	// 创建临时目录用于测试
 	tempDir, err := os.MkdirTemp("", "cache_test")
 	if err != nil {
 		t.Fatal(err)
@@ -451,23 +433,22 @@ func TestCachePersistence1(t *testing.T) {
 			PersistPath:      persistDir,
 			PersistInterval:  time.Millisecond * 100,
 			PersistThreshold: 2,
-			ShardCount:       1, // 使用单分片简化测试
+			ShardCount:       1, // Use single shard to simplify test
 		}
 
 		cache := NewCache(opts)
 		cache.Set("key1", "value1")
 		cache.Set("key2", "value2")
 
-		// 等待持久化完成
+		// Wait for persistence to complete
 		time.Sleep(time.Millisecond * 200)
 
-		// 检查分片0的持久化文件
+		// Check shard 0 persistence file
 		shardFile := filepath.Join(persistDir, "0.dat")
 		if _, err := os.Stat(shardFile); os.IsNotExist(err) {
 			t.Error("Persistence file should exist")
 		}
 
-		// 创建新的缓存实例
 		newCache := NewCache(opts)
 		time.Sleep(time.Millisecond * 100)
 
@@ -488,18 +469,18 @@ func TestCachePersistence1(t *testing.T) {
 		cache := NewCache(opts)
 		defer cache.Close()
 
-		// 写入数据但不超过阈值
+		// Write data without exceeding threshold
 		cache.Set("key1", "value1")
 		cache.Set("key2", "value2")
 		time.Sleep(time.Millisecond * 50)
 
-		// 检查分片0的持久化文件
+		// Check shard 0 persistence file
 		shardFile := filepath.Join(persistDir, "0.dat")
 		if _, err := os.Stat(shardFile); !os.IsNotExist(err) {
 			t.Error("Persistence file should not exist yet")
 		}
 
-		// 写入第三条数据触发持久化
+		// Write third item to trigger persistence
 		cache.Set("key3", "value3")
 		time.Sleep(time.Millisecond * 200)
 
@@ -507,7 +488,6 @@ func TestCachePersistence1(t *testing.T) {
 			t.Errorf("Persistence file should exist after threshold at path: %s. Error: %v", shardFile, err)
 		}
 
-		// 验证数据
 		newCache := NewCache(opts)
 		defer newCache.Close()
 		time.Sleep(time.Millisecond * 100)
@@ -530,13 +510,13 @@ func TestCachePersistence1(t *testing.T) {
 			ShardCount:       1,
 		}
 
-		// 第一个实例
+		// First instance
 		cache1 := NewCache(opts)
 		cache1.Set("key1", "value1")
 		cache1.Set("key2", "value2")
 		time.Sleep(time.Millisecond * 100)
 
-		// 第二个实例（模拟恢复）
+		// Second instance (simulate recovery)
 		cache2 := NewCache(opts)
 		time.Sleep(time.Millisecond * 100)
 
@@ -555,13 +535,13 @@ func TestCachePersistence1(t *testing.T) {
 			PersistPath:      persistDir,
 			PersistInterval:  time.Millisecond * 50,
 			PersistThreshold: 10,
-			ShardCount:       4, // 使用多个分片测试并发
+			ShardCount:       4, // Use multiple shards for concurrency testing
 		}
 
 		cache := NewCache(opts)
 		defer cache.Close()
 
-		// 并发写入
+		// Concurrent writes
 		var wg sync.WaitGroup
 		for i := 0; i < 20; i++ {
 			wg.Add(1)
@@ -576,7 +556,6 @@ func TestCachePersistence1(t *testing.T) {
 		wg.Wait()
 		time.Sleep(time.Millisecond * 200)
 
-		// 验证持久化
 		newCache := NewCache(opts)
 		defer newCache.Close()
 		time.Sleep(time.Millisecond * 100)
@@ -609,7 +588,6 @@ func TestGroupPersistence(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	t.Run("Group Persistence", func(t *testing.T) {
-		// 创建带持久化的缓存实例
 		cache := NewCache(Options{
 			PersistPath:     filepath.Join(dir, "group-test"),
 			PersistInterval: 100 * time.Millisecond,
@@ -617,7 +595,6 @@ func TestGroupPersistence(t *testing.T) {
 		})
 		defer cache.Close()
 
-		// 使用组设置一些数据
 		users := cache.Group("users")
 		posts := cache.Group("posts")
 
@@ -625,32 +602,30 @@ func TestGroupPersistence(t *testing.T) {
 		users.SetWithExpiration("2", "user2", 200*time.Millisecond)
 		posts.Set("1", "post1")
 
-		// 等待持久化
+		// Wait for persistence
 		time.Sleep(150 * time.Millisecond)
 
-		// 创建新的缓存实例
 		newCache := NewCache(Options{
 			PersistPath: filepath.Join(dir, "group-test"),
 			ShardCount:  2,
 		})
 		defer newCache.Close()
 
-		// 验证组数据
 		newUsers := newCache.Group("users")
 		newPosts := newCache.Group("posts")
 
-		// 检查永久键
+		// Check permanent key
 		if val, exists := newUsers.Get("1"); !exists || val != "user1" {
 			t.Error("Permanent key in group should be loaded")
 		}
 
-		// 检查过期键
-		time.Sleep(100 * time.Millisecond) // 等待过期
+		// Check expired key
+		time.Sleep(100 * time.Millisecond) // Wait for expiration
 		if _, exists := newUsers.Get("2"); exists {
 			t.Error("Expired key in group should not be loaded")
 		}
 
-		// 检查其他组的键
+		// Check key from other group
 		if val, exists := newPosts.Get("1"); !exists || val != "post1" {
 			t.Error("Key in other group should be loaded")
 		}
