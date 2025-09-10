@@ -1010,6 +1010,54 @@ func TestCacheDefaultOptions(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("NextPowerOf2 Function", func(t *testing.T) {
+		tests := []struct {
+			input    uint64
+			expected uint64
+		}{
+			{0, 1},
+			{1, 1},
+			{2, 2},
+			{3, 4},
+			{7, 8},
+			{8, 8},
+			{9, 16},
+			{33, 64},
+			{1000, 1024},
+			{1024, 1024},
+			{1025, 2048},
+			// Test cases for larger values (32-bit boundary)
+			{0xFFFFFFFF, 0x100000000},  // 2^32 - 1 -> 2^32
+			{0x100000000, 0x100000000}, // 2^32 -> 2^32
+			{0x100000001, 0x200000000}, // 2^32 + 1 -> 2^33
+			{0x1FFFFFFFF, 0x200000000}, // Test high 32-bit values
+			// Test very large values that would fail without v |= v >> 32
+			{0x123456789ABCDEF0, 0x2000000000000000}, // Test 64-bit value
+		}
+
+		for _, test := range tests {
+			result := nextPowerOf2(test.input)
+			if result != test.expected {
+				t.Errorf("nextPowerOf2(%d) = %d; expected %d", test.input, result, test.expected)
+			}
+		}
+
+		// Test maximum safe value
+		maxSafe := uint64(1) << 62
+		result := nextPowerOf2(maxSafe)
+		if result != maxSafe {
+			t.Errorf("nextPowerOf2(%d) = %d; expected %d", maxSafe, result, maxSafe)
+		}
+
+		// Test value that would overflow if we tried to get next power of 2
+		largeValue := uint64(1) << 63
+		result = nextPowerOf2(largeValue)
+		// This should return the same value since it's already a power of 2
+		if result != largeValue {
+			t.Errorf("nextPowerOf2(%d) = %d; expected %d", largeValue, result, largeValue)
+		}
+	})
 }
 
 func TestCacheFactoryAndSingleton(t *testing.T) {

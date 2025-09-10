@@ -341,12 +341,16 @@ func (sc *ShardedCache) Group(name string) Group {
 // Input: 9  -> Output: 16
 // Input: 33 -> Output: 64
 func nextPowerOf2(v uint64) uint64 {
+	if v == 0 {
+		return 1
+	}
 	v--
 	v |= v >> 1
 	v |= v >> 2
 	v |= v >> 4
 	v |= v >> 8
 	v |= v >> 16
+	v |= v >> 32 // Fix: Handle 64-bit values properly
 	v++
 	return v
 }

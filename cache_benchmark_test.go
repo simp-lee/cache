@@ -25,19 +25,19 @@ func BenchmarkPersistToDisk(b *testing.B) {
 
 	for _, size := range dataSizes {
 		b.Run(fmt.Sprintf("Size-%d", size), func(b *testing.B) {
-			// 准备数据
+			// Prepare data
 			persistPath := filepath.Join(tempDir, fmt.Sprintf("cache-%d", size))
 			c := NewCache(Options{
 				PersistPath: persistPath,
 			})
 
-			// 类型断言获取ShardedCache
+			// Type assertion to get ShardedCache
 			shardedCache, ok := c.(*ShardedCache)
 			if !ok {
 				b.Fatalf("Expected ShardedCache, got %T", c)
 			}
 
-			// 填充数据
+			// Fill data
 			for i := 0; i < size; i++ {
 				key := fmt.Sprintf("key-%d", i)
 				value := fmt.Sprintf("value-%d", i)
@@ -45,14 +45,14 @@ func BenchmarkPersistToDisk(b *testing.B) {
 			}
 
 			b.ResetTimer()
-			// 测试持久化性能
+			// Test persistence performance
 			for i := 0; i < b.N; i++ {
 				if shard := shardedCache.getShard("trigger-key"); shard != nil {
 					shard.persistToDisk()
 				}
 			}
 
-			c.Close() // 最后关闭缓存
+			c.Close()
 		})
 	}
 }
@@ -63,7 +63,7 @@ func BenchmarkShardedCache(b *testing.B) {
 		MaxSize:    1000000,
 	})
 
-	// 预填充一些数据
+	// Pre-fill some data
 	for i := 0; i < 100000; i++ {
 		cache.Set(fmt.Sprintf("key-%d", i), i)
 	}
@@ -104,9 +104,9 @@ func BenchmarkShardedCache(b *testing.B) {
 			for pb.Next() {
 				n := atomic.AddInt64(&i, 1)
 				key := fmt.Sprintf("key-%d", n%100000)
-				if n%5 == 0 { // 20% 写入
+				if n%5 == 0 { // 20% write
 					cache.Set(key, n)
-				} else { // 80% 读取
+				} else { // 80% read
 					cache.Get(key)
 				}
 			}
@@ -126,7 +126,7 @@ func BenchmarkShardedCache(b *testing.B) {
 	})
 
 	b.Run("Delete", func(b *testing.B) {
-		// 先预填充一些数据用于删除
+		// Pre-fill some data for deletion
 		for i := 0; i < 100000; i++ {
 			cache.Set(fmt.Sprintf("del-key-%d", i), i)
 		}
@@ -142,7 +142,7 @@ func BenchmarkShardedCache(b *testing.B) {
 }
 
 func BenchmarkCacheComparison(b *testing.B) {
-	// 创建不同类型的缓存实现
+	// Create different types of cache implementations
 	shardedCache := NewCache(Options{
 		ShardCount:        32,
 		MaxSize:           1000000,
@@ -153,7 +153,7 @@ func BenchmarkCacheComparison(b *testing.B) {
 	goCache := gocache.New(5*time.Minute, 10*time.Minute)
 
 	bigCacheConfig := bigcache.DefaultConfig(5 * time.Minute)
-	bigCacheConfig.Verbose = false // 关闭日志
+	bigCacheConfig.Verbose = false // Disable logging
 	bigCache, err := bigcache.New(context.Background(), bigCacheConfig)
 	if err != nil {
 		b.Fatal(err)
@@ -162,7 +162,7 @@ func BenchmarkCacheComparison(b *testing.B) {
 	simpleMap := make(map[string]string)
 	var mapMutex sync.RWMutex
 
-	// 预填充数据
+	// Pre-fill data
 	for i := 0; i < 1000000; i++ {
 		key := fmt.Sprintf("key%d", i)
 		value := fmt.Sprintf("value%d", i)
@@ -386,14 +386,14 @@ func BenchmarkCacheComparison(b *testing.B) {
 		})
 	}
 
-	// 报告内存使用情况
+	// Report memory usage
 	b.Run("MemoryUsage", func(b *testing.B) {
 		measureMemory := func(f func()) float64 {
 			runtime.GC()
 			var m1, m2 runtime.MemStats
 			runtime.ReadMemStats(&m1)
 
-			f() // 执行测试函数
+			f() // Execute test function
 
 			runtime.GC()
 			runtime.ReadMemStats(&m2)
@@ -403,14 +403,14 @@ func BenchmarkCacheComparison(b *testing.B) {
 			return float64(m2.HeapAlloc) / (1024 * 1024)
 		}
 
-		// 清空所有现有数据并等待GC完成
+		// Clear all existing data and wait for GC to complete
 		shardedCache = nil
 		goCache = nil
 		simpleMap = nil
 		runtime.GC()
-		time.Sleep(time.Millisecond * 100) // 给GC一些时间完成
+		time.Sleep(time.Millisecond * 100) // Give GC some time to complete
 
-		// 测试 ShardedCache 内存
+		// Test ShardedCache memory
 		memUsed := measureMemory(func() {
 			shardedCache = NewCache(Options{
 				ShardCount:        32,
@@ -424,12 +424,12 @@ func BenchmarkCacheComparison(b *testing.B) {
 		b.Logf("ShardedCache - Items: %d, Memory: %.2f MB",
 			shardedCache.Count(), memUsed)
 
-		// 清理并等待
+		// Clear and wait
 		shardedCache = nil
 		runtime.GC()
 		time.Sleep(time.Millisecond * 100)
 
-		// 测试 GoCache 内存
+		// Test GoCache memory
 		memUsed = measureMemory(func() {
 			goCache = gocache.New(5*time.Minute, 10*time.Minute)
 			for i := 0; i < 1000000; i++ {
@@ -439,14 +439,14 @@ func BenchmarkCacheComparison(b *testing.B) {
 		b.Logf("GoCache - Items: %d, Memory: %.2f MB",
 			goCache.ItemCount(), memUsed)
 
-		// 清理并等待
+		// Clear and wait
 		goCache = nil
 		runtime.GC()
 		time.Sleep(time.Millisecond * 100)
 
-		// 测试 SyncMap 内存
+		// Test SyncMap memory
 		memUsed = measureMemory(func() {
-			simpleMap = make(map[string]string, 1000000) // 预分配容量
+			simpleMap = make(map[string]string, 1000000) // Pre-allocate capacity
 			for i := 0; i < 1000000; i++ {
 				simpleMap[fmt.Sprintf("key%d", i)] = fmt.Sprintf("value%d", i)
 			}
@@ -454,14 +454,14 @@ func BenchmarkCacheComparison(b *testing.B) {
 		b.Logf("SyncMap - Items: %d, Memory: %.2f MB",
 			len(simpleMap), memUsed)
 
-		// 测试 BigCache 内存
+		// Test BigCache memory
 		bigCache = nil
 		runtime.GC()
 		time.Sleep(time.Millisecond * 100)
 
 		memUsed = measureMemory(func() {
 			bigCacheConfig := bigcache.DefaultConfig(5 * time.Minute)
-			bigCacheConfig.Verbose = false // 关闭日志
+			bigCacheConfig.Verbose = false // Disable logging
 			bigCache, err = bigcache.New(context.Background(), bigCacheConfig)
 			if err != nil {
 				b.Fatal(err)
@@ -483,19 +483,19 @@ func BenchmarkConcurrentPersist(b *testing.B) {
 
 	for _, size := range dataSizes {
 		b.Run(fmt.Sprintf("Size-%d", size), func(b *testing.B) {
-			// 准备数据
+			// Prepare data
 			persistPath := filepath.Join(tempDir, fmt.Sprintf("cache-%d", size))
 			c := NewCache(Options{
 				PersistPath: persistPath,
 			})
 
-			// 类型断言获取ShardedCache
+			// Type assertion to get ShardedCache
 			shardedCache, ok := c.(*ShardedCache)
 			if !ok {
 				b.Fatalf("Expected ShardedCache, got %T", c)
 			}
 
-			// 填充数据
+			// Fill data
 			for i := 0; i < size; i++ {
 				key := fmt.Sprintf("key-%d", i)
 				value := fmt.Sprintf("value-%d", i)
@@ -503,7 +503,7 @@ func BenchmarkConcurrentPersist(b *testing.B) {
 			}
 
 			b.ResetTimer()
-			// 测试并发持久化性能
+			// Test concurrent persistence performance
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					if shard := shardedCache.getShard(fmt.Sprintf("key-%d", rand.Int())); shard != nil {
@@ -512,7 +512,7 @@ func BenchmarkConcurrentPersist(b *testing.B) {
 				}
 			})
 
-			c.Close() // 最后关闭缓存
+			c.Close()
 		})
 	}
 }
@@ -525,19 +525,19 @@ func BenchmarkMixedLoadWithPersist(b *testing.B) {
 
 	for _, size := range dataSizes {
 		b.Run(fmt.Sprintf("Size-%d", size), func(b *testing.B) {
-			// 准备数据
+			// Prepare data
 			persistPath := filepath.Join(tempDir, fmt.Sprintf("cache-%d", size))
 			c := NewCache(Options{
 				PersistPath: persistPath,
 			})
 
-			// 类型断言获取ShardedCache
+			// Type assertion to get ShardedCache
 			shardedCache, ok := c.(*ShardedCache)
 			if !ok {
 				b.Fatalf("Expected ShardedCache, got %T", c)
 			}
 
-			// 填充数据
+			// Fill data
 			for i := 0; i < size; i++ {
 				key := fmt.Sprintf("key-%d", i)
 				value := fmt.Sprintf("value-%d", i)
@@ -545,20 +545,20 @@ func BenchmarkMixedLoadWithPersist(b *testing.B) {
 			}
 
 			b.ResetTimer()
-			// 测试混合负载性能
+			// Test mixed load performance with occasional persistence
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					if rand.Float32() < 0.1 { // 10% 持久化操作
+					if rand.Float32() < 0.1 { // 10% persistence operations
 						if shard := shardedCache.getShard("trigger-key"); shard != nil {
 							shard.persistToDisk()
 						}
-					} else { // 90% 正常读写操作
-						// ... 读写操作 ...
+					} else { // 90% normal read/write operations
+						// ... read/write operations ...
 					}
 				}
 			})
 
-			c.Close() // 最后关闭缓存
+			c.Close()
 		})
 	}
 }
@@ -567,7 +567,7 @@ func BenchmarkCacheGroup(b *testing.B) {
 	cache := NewCache(Options{ShardCount: 32})
 	users := cache.Group("users")
 
-	// 预填充一些数据
+	// Pre-fill some data
 	for i := 0; i < 1000; i++ {
 		users.Set(fmt.Sprintf("%d", i), fmt.Sprintf("user-%d", i))
 	}
