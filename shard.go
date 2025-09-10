@@ -424,10 +424,18 @@ func (cs *cacheShard) persistToDisk() error {
 		if item.ExpireTime != nil && now.After(*item.ExpireTime) {
 			continue
 		}
+
+		// Create a safe copy of the expiration time to avoid pointer sharing issues
+		var expireTimeCopy *time.Time
+		if item.ExpireTime != nil {
+			t := *item.ExpireTime
+			expireTimeCopy = &t
+		}
+
 		items = append(items, persistItem{
 			Key:        key,
 			Value:      item.Value,
-			ExpireTime: item.ExpireTime,
+			ExpireTime: expireTimeCopy,
 			CreatedAt:  item.CreatedAt,
 		})
 	}

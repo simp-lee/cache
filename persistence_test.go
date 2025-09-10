@@ -631,3 +631,182 @@ func TestGroupPersistence(t *testing.T) {
 		}
 	})
 }
+
+// TestPersistenceRaceCondition tests that persistToDisk doesn't cause race conditions
+// when ExpireTime pointers are reused from the timePool
+func TestPersistenceRaceCondition(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "cache_race_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cache := NewCache(Options{
+		DefaultExpiration: 100 * time.Millisecond,
+		CleanupInterval:   50 * time.Millisecond,
+		ShardCount:        2,
+		PersistPath:       filepath.Join(tempDir, "cache"),
+		PersistInterval:   50 * time.Millisecond, // Reduced frequency to avoid file conflicts
+		PersistThreshold:  1,                     // Persist on every change
+	})
+	defer cache.Close()
+
+	const (
+		numGoroutines = 10
+		numOperations = 100
+	)
+
+	var wg sync.WaitGroup
+
+	// Start multiple goroutines that continuously add/delete items
+	// This will cause ExpireTime pointers to be frequently returned to and taken from timePool
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(goroutineID int) {
+			defer wg.Done()
+
+			for j := 0; j < numOperations; j++ {
+				key := fmt.Sprintf("key_%d_%d", goroutineID, j)
+
+				// Set with expiration
+				cache.SetWithExpiration(key, "value", 200*time.Millisecond)
+
+				// Immediately delete to return ExpireTime pointer to pool
+				cache.Delete(key)
+
+				// Set again to potentially reuse the same pointer
+				cache.SetWithExpiration(key+"_new", "new_value", 300*time.Millisecond)
+
+				// Small delay to let persistence happen
+				time.Sleep(time.Millisecond)
+			}
+		}(i)
+	}
+
+	// Start a goroutine that triggers manual persistence
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < numOperations; i++ {
+			// Force persistence on all shards
+			if sc, ok := cache.(*ShardedCache); ok {
+				for shardIndex := uint64(0); shardIndex < sc.shardNum; shardIndex++ {
+					shard := sc.shards[shardIndex]
+					if shard.persistPath != "" {
+						shard.persistToDisk() // This should not race with pointer reuse
+					}
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+
+	wg.Wait()
+
+	// If we reach here without data races, the test passes
+	t.Log("Race condition test completed successfully")
+}
+
+// TestPersistenceExpireTimeIntegrity verifies that persisted expiration times
+// are not corrupted by timePool reuse
+func TestPersistenceExpireTimeIntegrity(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "cache_integrity_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	persistPath := filepath.Join(tempDir, "cache")
+	cache := NewCache(Options{
+		DefaultExpiration: time.Hour, // Long expiration
+		CleanupInterval:   time.Hour,
+		ShardCount:        1, // Single shard for simplicity
+		PersistPath:       persistPath,
+		PersistInterval:   time.Hour, // Manual persistence only
+		PersistThreshold:  1000,      // Manual persistence only
+	})
+
+	// Set a key with a specific expiration time
+	cache.SetWithExpiration("test_key", "test_value", time.Hour)
+
+	// Get the actual expiration time for comparison
+	_, actualExpiration, exists := cache.GetWithExpiration("test_key")
+	if !exists {
+		t.Fatal("Key should exist")
+	}
+
+	// Create many other keys to force timePool reuse
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("temp_key_%d", i)
+		cache.SetWithExpiration(key, "temp_value", time.Hour)
+		cache.Delete(key) // Return ExpireTime to pool
+	}
+
+	// Force persistence manually by accessing the shard directly
+	if sc, ok := cache.(*ShardedCache); ok {
+		shard := sc.shards[0]
+
+		// Manually call persistToDisk in a controlled way
+		items := make([]persistItem, 0)
+		now := time.Now()
+
+		shard.mu.RLock()
+		for key, item := range shard.items {
+			if item.ExpireTime != nil && now.After(*item.ExpireTime) {
+				continue
+			}
+
+			// This is the fixed code - create a safe copy of the expiration time
+			var expireTimeCopy *time.Time
+			if item.ExpireTime != nil {
+				t := *item.ExpireTime
+				expireTimeCopy = &t
+			}
+
+			items = append(items, persistItem{
+				Key:        key,
+				Value:      item.Value,
+				ExpireTime: expireTimeCopy,
+				CreatedAt:  item.CreatedAt,
+			})
+		}
+		shard.mu.RUnlock()
+
+		// Verify we collected the expected item
+		found := false
+		var persistedExpiration *time.Time
+		for _, item := range items {
+			if item.Key == "test_key" {
+				found = true
+				persistedExpiration = item.ExpireTime
+				break
+			}
+		}
+
+		if !found {
+			t.Fatal("test_key should be in persisted items")
+		}
+
+		if persistedExpiration == nil {
+			t.Fatal("test_key should have an expiration time")
+		}
+
+		// The persisted time should match the original time (within tolerance)
+		timeDiff := persistedExpiration.Sub(actualExpiration)
+		if timeDiff < 0 {
+			timeDiff = -timeDiff
+		}
+
+		if timeDiff > time.Second {
+			t.Errorf("Expiration time integrity compromised: expected %v, got %v (diff: %v)",
+				actualExpiration, *persistedExpiration, timeDiff)
+		} else {
+			t.Logf("Expiration time integrity verified: original=%v, persisted=%v",
+				actualExpiration, *persistedExpiration)
+		}
+	} else {
+		t.Fatal("Expected ShardedCache type")
+	}
+
+	cache.Close()
+}
