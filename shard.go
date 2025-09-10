@@ -87,7 +87,7 @@ func newCacheShard(opts Options, persistPath string) *cacheShard {
 func (cs *cacheShard) set(key string, value interface{}) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	cs.setWithExpirationUnlocked(key, value, cs.defaultExpiration)
+	cs.setWithExpirationUnlocked(key, value, DefaultExpiration)
 }
 
 func (cs *cacheShard) setWithExpiration(key string, value interface{}, expiration time.Duration) {
@@ -99,11 +99,26 @@ func (cs *cacheShard) setWithExpiration(key string, value interface{}, expiratio
 func (cs *cacheShard) setWithExpirationUnlocked(key string, value interface{}, expiration time.Duration) {
 	item := itemPool.Get().(*cacheItem)
 
-	if expiration > 0 {
+	switch {
+	case expiration == NoExpiration:
+		// Item never expires
+		item.ExpireTime = nil
+	case expiration == DefaultExpiration:
+		// Use cache's default expiration time
+		if cs.defaultExpiration > 0 {
+			t := timePool.Get().(*time.Time)
+			*t = time.Now().Add(cs.defaultExpiration)
+			item.ExpireTime = t
+		} else {
+			item.ExpireTime = nil
+		}
+	case expiration > 0:
+		// Use specified expiration time
 		t := timePool.Get().(*time.Time)
 		*t = time.Now().Add(expiration)
 		item.ExpireTime = t
-	} else {
+	default:
+		// For other negative values, treat as no expiration to avoid immediate expiry
 		item.ExpireTime = nil
 	}
 
@@ -139,6 +154,7 @@ func (cs *cacheShard) setWithExpirationUnlocked(key string, value interface{}, e
 }
 
 func (cs *cacheShard) get(key string) (interface{}, bool) {
+	now := time.Now()
 	cs.mu.RLock()
 	item, found := cs.items[key]
 	if !found {
@@ -148,7 +164,7 @@ func (cs *cacheShard) get(key string) (interface{}, bool) {
 	}
 
 	// Check if the item has expired
-	if item.ExpireTime != nil && time.Now().After(*item.ExpireTime) {
+	if item.ExpireTime != nil && now.After(*item.ExpireTime) {
 		cs.mu.RUnlock()
 		atomic.AddUint64(&cs.misses, 1)
 		cs.delete(key)
@@ -161,6 +177,7 @@ func (cs *cacheShard) get(key string) (interface{}, bool) {
 }
 
 func (cs *cacheShard) getWithExpiration(key string) (interface{}, *time.Time, bool) {
+	now := time.Now()
 	cs.mu.RLock()
 	item, found := cs.items[key]
 	if !found {
@@ -170,7 +187,7 @@ func (cs *cacheShard) getWithExpiration(key string) (interface{}, *time.Time, bo
 	}
 
 	// Check if the item has expired
-	if item.ExpireTime != nil && time.Now().After(*item.ExpireTime) {
+	if item.ExpireTime != nil && now.After(*item.ExpireTime) {
 		cs.mu.RUnlock()
 		atomic.AddUint64(&cs.misses, 1)
 		cs.delete(key)
@@ -391,11 +408,14 @@ func (cs *cacheShard) persistToDisk() error {
 
 	items := make([]persistItem, 0, len(cs.items))
 
+	// Cache the current time before entering the loop
+	now := time.Now()
+
 	// Acquire a read lock to get a snapshot of the current data
 	cs.mu.RLock()
 	for key, item := range cs.items {
 		// Skip expired items
-		if item.ExpireTime != nil && time.Now().After(*item.ExpireTime) {
+		if item.ExpireTime != nil && now.After(*item.ExpireTime) {
 			continue
 		}
 		items = append(items, persistItem{

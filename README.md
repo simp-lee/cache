@@ -13,6 +13,7 @@ This is a new version of [SwiftCache](https://github.com/simp-lee/SwiftCache). B
 - **Eviction Callbacks**: Support for custom eviction handlers
 - **Group Support**: Efficient namespace management with full feature support for grouped cache operations
 - **Type-Safe Get Operations**: Added utility functions like `GetTyped[T](cache, key)` to retrieve values with type safety using generics
+- **Robust Expiration Handling**: Improved expiration semantics with explicit constants (`NoExpiration`, `DefaultExpiration`) and safe handling of negative duration values
 
 ### Note on Eviction Policies
 This version focuses on time-based expiration. If you need LRU/FIFO eviction policies, please use [SwiftCache](https://github.com/simp-lee/SwiftCache).
@@ -99,6 +100,17 @@ go get github.com/simp-lee/cache
 ```
 
 ## Usage
+
+### Constants
+
+The cache provides predefined constants for expiration times:
+
+```go
+const (
+    NoExpiration      time.Duration = -1 // Item never expires
+    DefaultExpiration time.Duration = 0  // Use cache's default expiration time
+)
+```
 
 ### Interface
 
@@ -232,6 +244,42 @@ cache := shardedcache.NewCache(shardedcache.Options{
 cache.Set("key", "value")
 value, exists := cache.Get("key")
 ```
+
+#### 2.1. Expiration Constants
+
+The cache provides predefined constants for expiration times:
+
+```go
+// Expiration constants
+const (
+    NoExpiration      time.Duration = -1 // Item never expires
+    DefaultExpiration time.Duration = 0  // Use cache's default expiration time
+)
+
+// Usage examples
+cache := shardedcache.NewCache(shardedcache.Options{
+    DefaultExpiration: time.Hour, // Set default expiration to 1 hour
+})
+
+// Set a value that never expires
+cache.SetWithExpiration("permanent_key", "value", shardedcache.NoExpiration)
+
+// Set a value using the cache's default expiration (1 hour in this case)
+cache.SetWithExpiration("temp_key", "value", shardedcache.DefaultExpiration)
+
+// Set a value with custom expiration
+cache.SetWithExpiration("custom_key", "value", time.Minute*30)
+
+// Negative values (other than NoExpiration) are treated as no expiration
+cache.SetWithExpiration("safe_key", "value", -10*time.Second) // Will never expire
+```
+
+**Important Notes:**
+- `NoExpiration (-1)`: Item will never expire automatically
+- `DefaultExpiration (0)`: Item will use the cache's `DefaultExpiration` setting
+- Positive values: Item will expire after the specified duration
+- Other negative values: Treated as no expiration (for safety, prevents immediate expiry)
+- If cache's `DefaultExpiration` is 0 and you use `DefaultExpiration` constant, the item will never expire
 
 #### 3. Group Support
 

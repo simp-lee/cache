@@ -1525,3 +1525,108 @@ func TestAtomicGetOrSetFunc(t *testing.T) {
 	t.Logf("Function call count: %d", atomic.LoadInt64(&funcCallCount))
 	t.Logf("Result: %v", firstResult)
 }
+
+func TestExpirationConstants(t *testing.T) {
+	cache := NewCache(Options{
+		DefaultExpiration: time.Minute,
+		ShardCount:        1,
+	})
+	defer cache.Close()
+
+	t.Run("NoExpiration constant", func(t *testing.T) {
+		// Use NoExpiration constant
+		cache.SetWithExpiration("never_expires", "value", NoExpiration)
+
+		// Verify item exists
+		if value, exists := cache.Get("never_expires"); !exists || value != "value" {
+			t.Errorf("Expected key to exist with value 'value', got exists=%v, value=%v", exists, value)
+		}
+
+		// Verify expiration time is nil (meaning never expires)
+		if _, expireTime, exists := cache.GetWithExpiration("never_expires"); !exists || expireTime != nil {
+			t.Errorf("Expected key to exist with nil expiration time, got exists=%v, expireTime=%v", exists, expireTime)
+		}
+	})
+
+	t.Run("DefaultExpiration constant", func(t *testing.T) {
+		// Use DefaultExpiration constant
+		cache.SetWithExpiration("default_expiry", "value", DefaultExpiration)
+
+		// Verify item exists
+		if value, exists := cache.Get("default_expiry"); !exists || value != "value" {
+			t.Errorf("Expected key to exist with value 'value', got exists=%v, value=%v", exists, value)
+		}
+
+		// Verify expiration time is set (because DefaultExpiration = time.Minute)
+		if _, expireTime, exists := cache.GetWithExpiration("default_expiry"); !exists || expireTime == nil {
+			t.Errorf("Expected key to exist with expiration time set, got exists=%v, expireTime=%v", exists, expireTime)
+		}
+	})
+
+	t.Run("Negative expiration values", func(t *testing.T) {
+		// Test other negative values (not NoExpiration)
+		cache.SetWithExpiration("negative_expiry", "value", -5*time.Second)
+
+		// Verify item exists and never expires (instead of expiring immediately)
+		if value, exists := cache.Get("negative_expiry"); !exists || value != "value" {
+			t.Errorf("Expected key to exist with value 'value', got exists=%v, value=%v", exists, value)
+		}
+
+		// Verify expiration time is nil (meaning never expires)
+		if _, expireTime, exists := cache.GetWithExpiration("negative_expiry"); !exists || expireTime != nil {
+			t.Errorf("Expected key to exist with nil expiration time, got exists=%v, expireTime=%v", exists, expireTime)
+		}
+	})
+
+	t.Run("Zero expiration with no default", func(t *testing.T) {
+		// Create cache with no default expiration time
+		noDefaultCache := NewCache(Options{
+			DefaultExpiration: 0, // No default expiration
+			ShardCount:        1,
+		})
+		defer noDefaultCache.Close()
+
+		// Use DefaultExpiration constant
+		noDefaultCache.SetWithExpiration("no_default", "value", DefaultExpiration)
+
+		// Verify item exists and never expires
+		if value, exists := noDefaultCache.Get("no_default"); !exists || value != "value" {
+			t.Errorf("Expected key to exist with value 'value', got exists=%v, value=%v", exists, value)
+		}
+
+		// Verify expiration time is nil
+		if _, expireTime, exists := noDefaultCache.GetWithExpiration("no_default"); !exists || expireTime != nil {
+			t.Errorf("Expected key to exist with nil expiration time, got exists=%v, expireTime=%v", exists, expireTime)
+		}
+	})
+
+	t.Run("Positive expiration", func(t *testing.T) {
+		// Test normal expiration time
+		cache.SetWithExpiration("positive_expiry", "value", 100*time.Millisecond)
+
+		// Check item exists immediately
+		if value, exists := cache.Get("positive_expiry"); !exists || value != "value" {
+			t.Errorf("Expected key to exist with value 'value', got exists=%v, value=%v", exists, value)
+		}
+
+		// Wait for expiration
+		time.Sleep(150 * time.Millisecond)
+
+		// Verify item has expired
+		if value, exists := cache.Get("positive_expiry"); exists {
+			t.Errorf("Expected key to be expired, but it still exists with value=%v", value)
+		}
+	})
+}
+
+func TestExpirationConstantsValues(t *testing.T) {
+	t.Run("Constant values", func(t *testing.T) {
+		if NoExpiration != -1 {
+			t.Errorf("Expected NoExpiration to be -1, got %v", NoExpiration)
+		}
+
+		if DefaultExpiration != 0 {
+			t.Errorf("Expected DefaultExpiration to be 0, got %v", DefaultExpiration)
+		}
+	})
+}

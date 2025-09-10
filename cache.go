@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// Expiration constants for cache items
+const (
+	NoExpiration      time.Duration = -1 // Item never expires
+	DefaultExpiration time.Duration = 0  // Use cache's default expiration time
+)
+
 type CacheInterface interface {
 	Set(key string, value interface{})
 	SetWithExpiration(key string, value interface{}, expiration time.Duration)

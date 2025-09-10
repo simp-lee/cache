@@ -176,24 +176,25 @@ func (sc *ShardedCache) DeletePrefix(prefix string) int {
 // GetOrSet implements CacheInterface
 func (sc *ShardedCache) GetOrSet(key string, value interface{}) interface{} {
 	shard := sc.getShard(key)
+	now := time.Now()
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
 	if item, found := shard.items[key]; found {
-		if item.ExpireTime == nil || time.Now().Before(*item.ExpireTime) {
+		if item.ExpireTime == nil || now.Before(*item.ExpireTime) {
 			atomic.AddUint64(&shard.hits, 1)
 			return item.Value
 		}
 		sc.deleteExpiredItemUnlocked(shard, key, item)
 	}
 
-	shard.setWithExpirationUnlocked(key, value, sc.opts.DefaultExpiration)
+	shard.setWithExpirationUnlocked(key, value, DefaultExpiration)
 	return value
 }
 
 // GetOrSetFunc implements CacheInterface
 func (sc *ShardedCache) GetOrSetFunc(key string, f func() interface{}) interface{} {
-	return sc.GetOrSetFuncWithExpiration(key, f, sc.opts.DefaultExpiration)
+	return sc.GetOrSetFuncWithExpiration(key, f, DefaultExpiration)
 }
 
 // GetOrSetFuncWithExpiration implements CacheInterface
@@ -206,12 +207,13 @@ func (sc *ShardedCache) GetOrSetFuncWithExpiration(key string, f func() interfac
 	}
 
 	// If not found, use a mutex to ensure the function is only called once
+	now := time.Now()
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
 	// Double-check, but this time directly accessing the items map
 	if item, found := shard.items[key]; found {
-		if item.ExpireTime == nil || time.Now().Before(*item.ExpireTime) {
+		if item.ExpireTime == nil || now.Before(*item.ExpireTime) {
 			atomic.AddUint64(&shard.hits, 1)
 			return item.Value
 		}
