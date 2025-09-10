@@ -244,16 +244,15 @@ func (sc *ShardedCache) Stats() map[string]interface{} {
 
 	hitRate := float64(0)
 	if total := totalHits + totalMisses; total > 0 {
-		hitRate = float64(totalHits) / float64(total) * 100
+		hitRate = float64(totalHits) / float64(total)
 	}
 
 	// Basic statistics
 	stats := map[string]interface{}{
 		"count":   totalCount,
-		"shards":  sc.shardNum,
 		"hits":    totalHits,
 		"misses":  totalMisses,
-		"hitRate": fmt.Sprintf("%.2f%%", hitRate),
+		"hitRate": hitRate,
 	}
 
 	// Add configuration information

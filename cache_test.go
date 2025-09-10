@@ -196,8 +196,8 @@ func TestSingletonCache(t *testing.T) {
 		if stats["misses"].(uint64) != 1 {
 			t.Errorf("Incorrect miss count in stats: %v", stats["misses"])
 		}
-		if stats["shards"].(uint64) != 32 {
-			t.Errorf("Incorrect shard count in stats: %v", stats["shards"])
+		if stats["shardCount"].(uint64) != 32 {
+			t.Errorf("Incorrect shard count in stats: %v", stats["shardCount"])
 		}
 	})
 
