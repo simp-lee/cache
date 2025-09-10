@@ -1,64 +1,333 @@
 # Sharded In-Memory Cache
 
-A high-performance sharded in-memory cache for Go, featuring group namespaces, disk persistence, and comprehensive cache operations. Designed for concurrent access with excellent performance characteristics.
+A high-performance sharded in-memory cache for Go with group namespaces, disk persistence, and comprehensive cache operations. Designed for concurrent access with excellent performance characteristics.
 
-## Important Notice
-This is a new version of [SwiftCache](https://github.com/simp-lee/SwiftCache). Both versions use sharded architecture for high concurrent performance, but with different focus:
+## Features
 
-### Key Improvements in this version
-- **Memory Safety**: Fixed data race issues in `GetWithExpiration` by returning time values instead of pointers, preventing memory corruption from object pool reuse
-- **Persistence Support**: Added ability to persist cache data to disk and reload on startup
-- **Enhanced Interface**: Added utility functions like `GetOrSet`, `GetOrSetFunc`, `GetWithExpiration`
-- **Comprehensive Statistics**: Added detailed cache statistics including hit rates and item counts
-- **Better Memory Management**: More efficient memory usage for large datasets
-- **Eviction Callbacks**: Support for custom eviction handlers
-- **Group Support**: Efficient namespace management with full feature support for grouped cache operations
-- **Type-Safe Get Operations**: Added utility functions like `GetTyped[T](cache, key)` to retrieve values with type safety using generics
-- **Robust Expiration Handling**: Improved expiration semantics with explicit constants (`NoExpiration`, `DefaultExpiration`) and safe handling of negative duration values
+- **Persistence Support**: Disk persistence and automatic reload on startup  
+- **Type Safety**: Generic `GetTyped[T]()` for type-safe value retrieval
+- **Group Support**: Namespace management for organized cache operations
+- **Expiration Control**: Flexible expiration with `NoExpiration` and `DefaultExpiration` constants
+- **Statistics**: Detailed cache statistics including hit rates and item counts
+- **Eviction Callbacks**: Custom handlers for item eviction events
+- **Batch Operations**: Efficient bulk delete operations with prefix/key matching
 
-### Note on Eviction Policies
-This version focuses on time-based expiration. If you need LRU/FIFO eviction policies, please use [SwiftCache](https://github.com/simp-lee/SwiftCache).
+## Installation
+
+```bash
+go get github.com/simp-lee/cache
+```
+
+## Quick Start
+
+### Basic Usage
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+    shardedcache "github.com/simp-lee/cache"
+)
+
+func main() {
+    // Create cache instance
+    cache := shardedcache.NewCache(shardedcache.Options{
+        MaxSize:           1000,
+        DefaultExpiration: time.Minute * 5,
+        ShardCount:        32, // Will auto-adjust to nearest power of two if needed
+    })
+
+    // Basic operations
+    cache.Set("key", "value")
+    value, exists := cache.Get("key")
+    if exists {
+        fmt.Println(value) // Output: value
+    }
+
+    // With expiration
+    cache.SetWithExpiration("temp", "data", time.Hour)
+    
+    // Type-safe retrieval
+    str, exists := shardedcache.GetTyped[string](cache, "key")
+    
+    // Utility functions
+    result := cache.GetOrSet("new_key", "default_value")
+    result = cache.GetOrSetFunc("computed", func() interface{} {
+        return "expensive computation"
+    })
+}
+```
+
+### Singleton Pattern
+
+```go
+// Initialize once at startup
+shardedcache.Init(shardedcache.Options{
+    DefaultExpiration: time.Hour,
+    ShardCount:        64,
+})
+
+// Use anywhere in your application
+cache := shardedcache.Get()
+cache.Set("global_key", "value")
+```
+
+### Expiration & Cleanup
+
+```go
+// Expiration constants
+const (
+    NoExpiration      time.Duration = -1 // Item never expires
+    DefaultExpiration time.Duration = 0  // Use cache's default expiration
+)
+
+// Usage examples
+cache := shardedcache.NewCache(shardedcache.Options{
+    DefaultExpiration: time.Hour,
+    // CleanupInterval > 0 starts a background goroutine that periodically removes expired entries.
+    // Setting CleanupInterval to 0 disables periodic cleanup (access still lazily removes expired items).
+})
+
+cache.SetWithExpiration("permanent", "value", shardedcache.NoExpiration)
+cache.SetWithExpiration("default", "value", shardedcache.DefaultExpiration)
+cache.SetWithExpiration("custom", "value", time.Minute*30)
+
+// Safe expiration time access (returns time.Time values, not pointers)
+value, expTime, exists := cache.GetWithExpiration("key")
+if exists {
+    if !expTime.IsZero() { // NoExpiration will yield zero time
+        remaining := time.Until(expTime)
+        fmt.Printf("Expires in: %v\n", remaining)
+    }
+    _ = value
+}
+
+// Expired entries are:
+// 1) Removed lazily on access (Get / GetWithExpiration)
+// 2) Removed eagerly by the periodic cleaner if CleanupInterval > 0
+```
+
+### Group Support
+
+Groups provide namespace isolation for cache keys with (practically) zero additional memory (only a tiny wrapper object; no separate storage structure):
+
+```go
+// Create groups for different data types
+users := cache.Group("users")
+posts := cache.Group("posts")
+
+// Groups are logically isolated (implemented via key prefix `<group>\x00:`)
+users.Set("1", userData)
+posts.Set("1", postData)  // Different from users.Get("1")
+
+// All cache operations available in groups
+users.SetWithExpiration("session:123", sessionData, time.Hour)
+value := users.GetOrSetFunc("profile:456", func() interface{} {
+    return fetchUserProfile("456")
+})
+
+// Group-specific operations
+users.Clear()                                    // Clear only user data
+deleted := users.DeletePrefix("session:")        // Delete user sessions
+deleted = users.DeleteKeys([]string{"1", "2"})   // Delete specific users
+```
+
+### Advanced Features
+
+#### Type-Safe Operations
+```go
+// Store typed data
+cache.Set("user", User{Name: "John", Age: 30})
+
+// Retrieve with type safety
+user, exists := shardedcache.GetTyped[User](cache, "user")
+if exists {
+    fmt.Println(user.Name) // Direct access to User fields
+}
+```
+
+#### Statistics and Monitoring
+```go
+// Set eviction callback
+cache.OnEvicted(func(key string, value interface{}) {
+    log.Printf("Item evicted: %s", key)
+})
+
+// Get cache statistics (keys are camelCase)
+stats := cache.Stats()
+// Provided fields:
+// count, hits, misses, hitRate,
+// maxSize, defaultExpiration, cleanupInterval,
+// persistInterval, persistThreshold, shardCount, persistPath
+fmt.Printf("Hit rate: %.2f\n", stats["hitRate"]) // hits / (hits + misses)
+fmt.Printf("Total items: %d\n", cache.Count())
+```
+
+#### Persistence
+```go
+cache := shardedcache.NewCache(shardedcache.Options{
+    PersistPath:      "/tmp/cachedata", // Directory path, NOT a single file
+    PersistInterval:  time.Minute * 5,   // Periodic flush (0 disables; negative input coerced to default 13m)
+    PersistThreshold: 100,               // Flush after N mutations (0 = every change; negative coerced to 100)
+})
+// Persistence details:
+// - A directory is created if missing.
+// - Each shard stores its own file: <PersistPath>/<shardIndex>.dat
+// - Triggers:
+//   * Threshold-based (mutations reach PersistThreshold)  -- requires PersistInterval > 0 (persister goroutine must be running)
+//   * Time-based (ticker at PersistInterval if there are changes)
+//   * Final flush on Close()
+// - Loading: On startup each shard attempts to load its corresponding file.
+// - Encoding: Go gob (interface{}). For custom concrete types register them, e.g.:
+//     gob.Register(MyStruct{})
+// Recommendation: Call Close() on graceful shutdown to ensure last changes are flushed.
+```
+
+### Concurrency & Singleflight-like Behavior
+
+`GetOrSetFunc` / `GetOrSetFuncWithExpiration` avoid duplicate computation for the same key via shard-level locking (not per-key lock). A shard lock means different keys on the same shard may serialize during the computation window; once value stored, later goroutines read it.
+
+### Eviction & Capacity
+
+`MaxSize` applies per shard (effective total capacity = MaxSize * shardCount). When adding a new key beyond capacity, the oldest (by creation time) item in that shard is evicted. This is a simple FIFO-by-insert-time policy (not LRU). For LRU/FIFO policy sophistication, see SwiftCache.
+
+### Key Enumeration Complexity
+
+`Keys()` and `Count()` iterate all shards (O(N)). Group `Count()` first builds the group's key list (also O(N)). Avoid invoking them on very hot paths for extremely large caches.
+
+## Configuration
+
+```go
+type Options struct {
+    MaxSize           int           // Max items per shard (0 = unlimited; negative -> coerced to 0)
+    DefaultExpiration time.Duration // Default expiration (<=0 -> no expiration; negative coerced to 0)
+    CleanupInterval   time.Duration // Background expiry cleanup (0 disables; negative input coerced to default 11m)
+    PersistPath       string        // Directory path for shard files (empty -> disable persistence)
+    PersistInterval   time.Duration // Periodic persistence (0 disables; negative input coerced to default 13m)
+    PersistThreshold  int           // Mutations threshold (0 -> every change; negative coerced to 100; threshold requires PersistInterval > 0 to flush immediately)
+    ShardCount        int           // Desired shard count (auto-rounded up to next power of 2; <=0 -> default 32)
+}
+
+Behavior Summary:
+- Shard auto-adjust: e.g. 33 -> 64
+- Negative CleanupInterval/PersistInterval are coerced to defaults (11m / 13m) rather than disabling
+- PersistThreshold only effective during runtime if PersistInterval > 0 (persister goroutine active)
+- Negative values for sizes/thresholds coerced to safe defaults
+- Persistence stores per-shard gob files
+- Close() flushes pending changes
+- Clear() resets hits & misses counters and triggers eviction callbacks for each item
+```
+
+## API Reference
+
+### Signatures (concise overview)
+
+```go
+// Core
+Set(key string, value interface{})
+SetWithExpiration(key string, value interface{}, expiration time.Duration)
+Get(key string) (value interface{}, found bool)
+GetWithExpiration(key string) (value interface{}, expireTime time.Time, found bool)
+Delete(key string) bool
+Has(key string) bool
+Clear()                  // Clears all cache items and resets hit/miss counters
+Close()                  // Flush persistence & stop background goroutines
+
+// Batch & Introspection
+DeleteKeys(keys []string) (deleted int)
+DeletePrefix(prefix string) (deleted int)   // prefix == "" -> no-op (use Clear())
+Keys() []string
+Count() int
+Stats() map[string]interface{}              // Fields: count,hits,misses,hitRate,maxSize,defaultExpiration,cleanupInterval,persistInterval,persistThreshold,shardCount,persistPath
+OnEvicted(cb func(key string, value interface{}))
+
+// Get-Or-Set helpers (single computation per key per shard)
+GetOrSet(key string, defaultValue interface{}) interface{}
+GetOrSetFunc(key string, f func() interface{}) interface{}
+GetOrSetFuncWithExpiration(key string, f func() interface{}, expiration time.Duration) interface{}
+
+// Generic helper
+GetTyped[T any](c CacheInterface, key string) (val T, found bool) // returns zero T + false on miss or type mismatch
+
+// Group interface (obtained via cache.Group(name))
+type Group interface {
+    Set(key string, value interface{})
+    SetWithExpiration(key string, value interface{}, expiration time.Duration)
+    Get(key string) (interface{}, bool)
+    GetWithExpiration(key string) (interface{}, time.Time, bool)
+    Delete(key string) bool
+    DeleteKeys(keys []string) int
+    DeletePrefix(prefix string) int
+    GetOrSet(key string, defaultValue interface{}) interface{}
+    GetOrSetFunc(key string, f func() interface{}) interface{}
+    GetOrSetFuncWithExpiration(key string, f func() interface{}, expiration time.Duration) interface{}
+    Keys() []string
+    Count() int
+    Has(key string) bool
+    Clear()
+}
+```
+
+### Notes
+- Groups are implemented by prefixing keys with `<group>\x00:`; avoid raw keys containing `\x00:` if possible.
+- Calling `shardedcache.Get()` before `Init()` will panic.
+- Eviction policy when `MaxSize` exceeded is oldest-by-creation (FIFO per shard).
+- Shard count auto-rounded up to the next power of two.
+- Persistence writes one gob file per shard inside the provided directory.
+- sync.Pool reduces allocations for items & time objects.
 
 ## Performance
 
-Both versions are designed for high efficiency and performance in concurrent environments. The choice between them should be based on feature requirements rather than performance differences.
+Designed for high efficiency and performance in concurrent environments. The benchmarks below were produced on the following test environment:
+
+**Test Environment:**
+- **CPU**: 13th Gen Intel(R) Core(TM) i5-13500H
+- **OS**: Windows 11 (windows/amd64)
+- **Go Version**: go1.24.6
+- **GOMAXPROCS**: 16 (default)
+- **Cores**: 16 logical processors
+
+Minor variations are expected across different hardware and Go versions.
 
 ## Performance Comparison
 
 Benchmark results comparing our `ShardedCache` with [go-cache](https://github.com/patrickmn/go-cache), [bigcache](https://github.com/allegro/bigcache) and sync.Map:
 
 ### Get Operations
-```
-ShardedCache/Get    22,687,654 ops/s    52.25 ns/op    100% hit    23 B/op    1 allocs/op
-GoCache/Get         16,722,361 ops/s    70.87 ns/op    100% hit    23 B/op    1 allocs/op
-SyncMap/Get         23,469,448 ops/s    51.16 ns/op    100% hit    23 B/op    1 allocs/op
-BigCache/Get        22,618,719 ops/s    55.79 ns/op    100% hit    54 B/op    3 allocs/op
-```
+| Implementation | ops/s | ns/op | Hit Rate | B/op | allocs/op |
+|----------------|-------|-------|----------|------|-----------|
+| ShardedCache   | 22,687,654 | 52.25 | 100% | 23 | 1 |
+| GoCache        | 16,722,361 | 70.87 | 100% | 23 | 1 |
+| SyncMap        | 23,469,448 | 51.16 | 100% | 23 | 1 |
+| BigCache       | 22,618,719 | 55.79 | 100% | 54 | 3 |
 
 ### Set Operations
-```
-ShardedCache/Set    16,102,454 ops/s    85.04 ns/op    75 B/op    5 allocs/op
-GoCache/Set          3,581,130 ops/s   395.70 ns/op    63 B/op    4 allocs/op
-SyncMap/Set          4,562,907 ops/s   304.90 ns/op    48 B/op    3 allocs/op
-BigCache/Set        30,792,758 ops/s    71.15 ns/op   186 B/op    4 allocs/op
-```
+| Implementation | ops/s | ns/op | B/op | allocs/op |
+|----------------|-------|-------|------|-----------|
+| ShardedCache   | 16,102,454 | 85.04 | 75  | 5 |
+| GoCache        | 3,581,130  | 395.70 | 63 | 4 |
+| SyncMap        | 4,562,907  | 304.90 | 48 | 3 |
+| BigCache       | 30,792,758 | 71.15  | 186 | 4 |
 
 ### Mixed Operations (80% Get, 20% Set)
-```
-ShardedCache/Mixed  18,508,464 ops/s    65.68 ns/op    100% hit    31 B/op    2 allocs/op
-GoCache/Mixed        2,130,778 ops/s   569.80 ns/op    100% hit    31 B/op    2 allocs/op
-SyncMap/Mixed        2,105,696 ops/s   567.90 ns/op    100% hit    47 B/op    3 allocs/op
-BigCache/Mixed      22,440,392 ops/s    54.70 ns/op    100% hit    53 B/op    3 allocs/op
-```
+| Implementation | ops/s | ns/op | Hit Rate | B/op | allocs/op |
+|----------------|-------|-------|----------|------|-----------|
+| ShardedCache   | 18,508,464 | 65.68 | 100% | 31 | 2 |
+| GoCache        | 2,130,778  | 569.80 | 100% | 31 | 2 |
+| SyncMap        | 2,105,696  | 567.90 | 100% | 47 | 3 |
+| BigCache       | 22,440,392 | 54.70  | 100% | 53 | 3 |
 
 ### Memory Usage
-Memory efficiency comparison with 1 million items:
-```
-ShardedCache    169.71 MB
-GoCache         135.03 MB
-SyncMap         102.77 MB
-BigCache        337.07 MB
-```
+Memory efficiency comparison with 1 million items (approximate, depends on key/value shapes):
+
+| Implementation | Approx Memory |
+|----------------|---------------|
+| ShardedCache   | 169.71 MB |
+| GoCache        | 135.03 MB |
+| SyncMap        | 102.77 MB |
+| BigCache       | 337.07 MB |
 
 ### Key Performance Characteristics
 
@@ -92,324 +361,10 @@ Choose `ShardedCache` when you need:
 - Reliable concurrent access
 - Rich feature set including expiration, statistics, and group support
 
-## Installation
+## Related Projects
 
-To use this cache in your Go project, you can import it as follows:
-
-```shell
-go get github.com/simp-lee/cache
-```
-
-## Usage
-
-### Constants
-
-The cache provides predefined constants for expiration times:
-
-```go
-const (
-    NoExpiration      time.Duration = -1 // Item never expires
-    DefaultExpiration time.Duration = 0  // Use cache's default expiration time
-)
-```
-
-### Interface
-
-The cache implements the following interface:
-
-```go
-type CacheInterface interface {
-    // Set sets a value in the cache
-    Set(key string, value interface{})
-    
-    // SetWithExpiration sets a value in the cache with an expiration time
-    SetWithExpiration(key string, value interface{}, expiration time.Duration)
-    
-    // Get retrieves a value from the cache
-    Get(key string) (interface{}, bool)
-    
-    // GetWithExpiration retrieves a value and its expiration time from the cache
-    GetWithExpiration(key string) (interface{}, time.Time, bool)
-    
-    // Delete removes a value from the cache
-    Delete(key string) bool
-    
-    // DeleteKeys deletes the specified keys in batch and returns the number of keys actually deleted
-    DeleteKeys(keys []string) int
-    
-    // DeletePrefix deletes all keys with the given prefix and returns the number of keys actually deleted
-    DeletePrefix(prefix string) int
-    
-    // GetOrSet returns existing value or sets and returns new value
-    GetOrSet(key string, value interface{}) interface{}
-    
-    // GetOrSetFunc returns existing value or sets and returns computed value
-    GetOrSetFunc(key string, f func() interface{}) interface{}
-    
-    // GetOrSetFuncWithExpiration same as GetOrSetFunc but with expiration
-    GetOrSetFuncWithExpiration(key string, f func() interface{}, expiration time.Duration) interface{}
-    
-    // Stats returns cache statistics
-    Stats() map[string]interface{}
-    
-    // OnEvicted sets callback function to be called when an item is evicted
-    OnEvicted(f func(key string, value interface{}))
-    
-    // Keys returns all keys in the cache
-    Keys() []string
-    
-    // Count returns the number of items in the cache
-    Count() int
-    
-    // Has checks if a key exists in the cache
-    Has(key string) bool
-    
-    // Clear removes all items from the cache
-    Clear()
-    
-    // Close shuts down the cache and persists data if configured
-    Close()
-
-    // Group provides a way to create a named group of items in the cache
-    Group(name string) Group
-}
-
-type Group interface {
-    // Basic operations
-    Set(key string, value interface{})
-    SetWithExpiration(key string, value interface{}, expiration time.Duration)
-    Get(key string) (interface{}, bool)
-    GetWithExpiration(key string) (interface{}, time.Time, bool)
-    Delete(key string) bool
-    
-    // Batch delete operations
-    DeleteKeys(keys []string) int
-    DeletePrefix(prefix string) int
-    
-    // Convenience methods
-    GetOrSet(key string, value interface{}) interface{}
-    GetOrSetFunc(key string, f func() interface{}) interface{}
-    GetOrSetFuncWithExpiration(key string, f func() interface{}, expiration time.Duration) interface{}
-    
-    // Group management
-    Keys() []string
-    Clear()
-    Count() int
-    Has(key string) bool
-}
-```
-
-### Usage Patterns
-
-#### 1. Singleton Pattern
-
-```go
-package main
-
-import (
-    "fmt"
-    "time"
-    "github.com/simp-lee/cache"
-)
-
-func main() {
-    // Initialize the cache (do this once at startup)
-    shardedcache.Init(shardedcache.Options{
-        MaxSize:           1000,
-        DefaultExpiration: time.Minute * 5,
-        ShardCount:        32,
-    })
-
-    // Get the cache instance anywhere in your code
-    cache := shardedcache.Get()
-
-    // Use the cache
-    cache.Set("key", "value")
-    value, exists := cache.Get("key")
-    if !exists {
-        fmt.Println("key not found")
-    }
-    fmt.Println(value)
-}
-```
-
-#### 2. New Instance
-
-```go
-// Create a new cache instance
-cache := shardedcache.NewCache(shardedcache.Options{
-    MaxSize:           1000,
-    DefaultExpiration: time.Minute * 5,
-    ShardCount:        64,
-})
-
-// Use the cache
-cache.Set("key", "value")
-value, exists := cache.Get("key")
-```
-
-#### 2.1. Expiration Constants
-
-The cache provides predefined constants for expiration times:
-
-```go
-// Expiration constants
-const (
-    NoExpiration      time.Duration = -1 // Item never expires
-    DefaultExpiration time.Duration = 0  // Use cache's default expiration time
-)
-
-// Usage examples
-cache := shardedcache.NewCache(shardedcache.Options{
-    DefaultExpiration: time.Hour, // Set default expiration to 1 hour
-})
-
-// Set a value that never expires
-cache.SetWithExpiration("permanent_key", "value", shardedcache.NoExpiration)
-
-// Set a value using the cache's default expiration (1 hour in this case)
-cache.SetWithExpiration("temp_key", "value", shardedcache.DefaultExpiration)
-
-// Set a value with custom expiration
-cache.SetWithExpiration("custom_key", "value", time.Minute*30)
-
-// Negative values (other than NoExpiration) are treated as no expiration
-cache.SetWithExpiration("safe_key", "value", -10*time.Second) // Will never expire
-```
-
-**Important Notes:**
-- `NoExpiration (-1)`: Item will never expire automatically
-- `DefaultExpiration (0)`: Item will use the cache's `DefaultExpiration` setting
-- Positive values: Item will expire after the specified duration
-- Other negative values: Treated as no expiration (for safety, prevents immediate expiry)
-- If cache's `DefaultExpiration` is 0 and you use `DefaultExpiration` constant, the item will never expire
-
-#### 3. Group Support
-
-Cache groups provide a way to namespace your cache keys and perform operations on a group of related items. Groups are virtual and add no memory overhead while providing full isolation between different namespaces.
-
-```go
-// Create groups for different types of items
-users := cache.Group("users")
-posts := cache.Group("posts")
-
-// Set values in different groups
-users.Set("1", userData)
-posts.Set("1", postData)
-
-// Groups are isolated
-usersValue, _ := users.Get("1")  // gets userData
-postsValue, _ := posts.Get("1")  // gets postData
-
-// Group with expiration
-users.SetWithExpiration("2", userData2, time.Hour)
-
-// Convenience methods
-value := users.GetOrSet("3", defaultValue)
-value = users.GetOrSetFunc("4", func() interface{} {
-    // Fetch user from database
-    return fetchUserFromDB("4")
-})
-
-// Clear the group
-users.Clear()
-
-// Batch deletions
-// Delete keys by group prefix (recommended)
-deleted := users.DeletePrefix("session:")
-// Delete specific keys
-deleted = users.DeleteKeys([]string{"1", "2"})
-```
-
-#### 4. Type-Safe Get Operations
-
-`GetTyped` is a utility function to retrieve values with type safety using generics:
-
-```go
-// Store a string value
-cache.Set("key", "value")
-
-// Retrieve the string value    
-value, exists := shardedcache.GetTyped[string](cache, "key")
-if !exists {
-    fmt.Println("key not found")
-}
-fmt.Println(value) // value is of type string
-
-// Store a custom struct
-type User struct {
-    Name string
-    Age int
-}
-cache.Set("key", User{Name: "John", Age: 30})
-
-// Retrieve the custom struct with type safety
-value, exists = shardedcache.GetTyped[User](cache, "key")
-if !exists {
-    fmt.Println("key not found")
-}
-fmt.Println(value) // type-safe access to User struct
-
-// If type is not found, it will return the zero value of the type and false
-value, exists = shardedcache.GetTyped[int](cache, "key")
-fmt.Println(value) // 0, false
-```
-
-#### 5. Safe Expiration Time Access
-
-The `GetWithExpiration` method now returns `time.Time` values instead of pointers, ensuring memory safety and preventing data races:
-
-```go
-// Set a value with expiration
-cache.SetWithExpiration("key", "value", time.Hour)
-
-// Get value with expiration time - returns safe time value copy
-value, expTime, exists := cache.GetWithExpiration("key")
-if exists {
-    fmt.Printf("Value: %v, Expires at: %v\n", value, expTime)
-    
-    // The expTime is a value copy, safe to use even after the item is deleted
-    // This prevents data race issues that could occur with pointer returns
-    
-    // Safe to access expTime properties
-    if !expTime.IsZero() {
-        remaining := time.Until(expTime)
-        fmt.Printf("Time remaining: %v\n", remaining)
-    }
-}
-
-// For non-expiring items, expTime will be zero value
-cache.SetWithExpiration("permanent", "value", shardedcache.NoExpiration)
-value, expTime, exists = cache.GetWithExpiration("permanent")
-if exists && expTime.IsZero() {
-    fmt.Println("Item never expires")
-}
-```
-
-**Memory Safety Benefits:**
-- No risk of accessing deallocated memory
-- Thread-safe access to expiration times
-- Eliminates data race conditions in concurrent environments
-- Compatible with object pool optimizations
-
-### Configuration Options
-
-```go
-type Options struct {
-    MaxSize           int           // Maximum items per shard (0 = unlimited)
-    DefaultExpiration time.Duration // Default item expiration time (0 = no expiration)
-    CleanupInterval   time.Duration // Interval for cleaning expired items (0 = disable auto cleanup, defaults to 11m)
-    PersistPath       string        // File path for persistence storage (empty = disable persistence)
-    PersistInterval   time.Duration // Interval for data persistence (0 = disable auto persistence, defaults to 13m)
-    PersistThreshold  int           // Number of changes before triggering persistence (0 = persist every change, defaults to 100)
-    ShardCount        int           // Number of cache shards, must be power of 2 (defaults to 32)
-}
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a pull request or open an issue.
+For advanced LRU/FIFO eviction policies, see [SwiftCache](https://github.com/simp-lee/SwiftCache). This project uses a simpler creation-time FIFO eviction when `MaxSize` is exceeded.
 
 ## License
 
-This project is licensed under the MIT License.
+MIT License
