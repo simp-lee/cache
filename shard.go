@@ -182,20 +182,24 @@ func (cs *cacheShard) getWithExpiration(key string) (interface{}, *time.Time, bo
 	return item.Value, item.ExpireTime, true
 }
 
-func (cs *cacheShard) delete(key string) error {
+func (cs *cacheShard) delete(key string) bool {
 	cs.mu.Lock()
-	if item := cs.items[key]; item != nil {
-		if cs.onEvicted != nil {
-			cs.onEvicted(key, item.Value)
-		}
-		if item.ExpireTime != nil {
-			timePool.Put(item.ExpireTime)
-		}
-		itemPool.Put(item)
-		delete(cs.items, key)
+	defer cs.mu.Unlock()
+
+	item := cs.items[key]
+	if item == nil {
+		return false
 	}
-	cs.mu.Unlock()
-	return nil
+
+	if cs.onEvicted != nil {
+		cs.onEvicted(key, item.Value)
+	}
+	if item.ExpireTime != nil {
+		timePool.Put(item.ExpireTime)
+	}
+	itemPool.Put(item)
+	delete(cs.items, key)
+	return true
 }
 
 // deletePrefix deletes all keys with the given prefix in this shard and returns the number of deleted keys.

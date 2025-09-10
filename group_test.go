@@ -26,9 +26,18 @@ func TestCacheGroup(t *testing.T) {
 			t.Errorf("Expected 2 keys in users group, got %d", len(userKeys))
 		}
 
-		users.Delete("1")
+		deleted := users.Delete("1")
+		if !deleted {
+			t.Error("Delete should return true for existing key")
+		}
 		if _, exists := users.Get("1"); exists {
 			t.Error("Failed to delete key from group")
+		}
+
+		// Test deleting non-existing key
+		deleted = users.Delete("non-existing")
+		if deleted {
+			t.Error("Delete should return false for non-existing key")
 		}
 
 		if !users.Has("2") {

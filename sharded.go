@@ -118,7 +118,7 @@ func (sc *ShardedCache) GetWithExpiration(key string) (interface{}, *time.Time, 
 }
 
 // Delete implements CacheInterface
-func (sc *ShardedCache) Delete(key string) error {
+func (sc *ShardedCache) Delete(key string) bool {
 	return sc.getShard(key).delete(key)
 }
 
@@ -307,7 +307,7 @@ func (sc *ShardedCache) Has(key string) bool {
 }
 
 // Clear implements CacheInterface
-func (sc *ShardedCache) Clear() error {
+func (sc *ShardedCache) Clear() {
 	for _, shard := range sc.shards {
 		shard.mu.Lock()
 		// First collect key/value pairs for eviction callback
@@ -347,7 +347,6 @@ func (sc *ShardedCache) Clear() error {
 			shard.onEvicted(evicted.key, evicted.value)
 		}
 	}
-	return nil
 }
 
 // Close implements CacheInterface

@@ -8,7 +8,7 @@ type Group interface {
 	SetWithExpiration(key string, value interface{}, expiration time.Duration)
 	Get(key string) (interface{}, bool)
 	GetWithExpiration(key string) (interface{}, *time.Time, bool)
-	Delete(key string) error
+	Delete(key string) bool
 
 	// Batch delete operations
 	DeleteKeys(keys []string) int
@@ -23,7 +23,7 @@ type Group interface {
 	Keys() []string
 	Count() int
 	Has(key string) bool
-	Clear() error
+	Clear()
 }
 
 const groupKeySeparator = "\x00:" // Use NULL character as separator prefix
@@ -55,7 +55,7 @@ func (g *cacheGroup) GetWithExpiration(key string) (interface{}, *time.Time, boo
 	return g.cache.GetWithExpiration(g.buildKey(key))
 }
 
-func (g *cacheGroup) Delete(key string) error {
+func (g *cacheGroup) Delete(key string) bool {
 	return g.cache.Delete(g.buildKey(key))
 }
 
@@ -114,17 +114,13 @@ func (g *cacheGroup) Has(key string) bool {
 	return g.cache.Has(g.buildKey(key))
 }
 
-func (g *cacheGroup) Clear() error {
+func (g *cacheGroup) Clear() {
 	keys := g.cache.Keys()
 	groupPrefix := g.groupName + groupKeySeparator
 
 	for _, key := range keys {
 		if len(key) >= len(groupPrefix) && key[:len(groupPrefix)] == groupPrefix {
-			if err := g.cache.Delete(key); err != nil {
-				return err
-			}
+			g.cache.Delete(key)
 		}
 	}
-
-	return nil
 }

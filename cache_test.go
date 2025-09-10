@@ -85,9 +85,27 @@ func TestCache(t *testing.T) {
 
 	t.Run("Delete", func(t *testing.T) {
 		cache.Set("key4", "value4")
-		cache.Delete("key4")
+		deleted := cache.Delete("key4")
+		if !deleted {
+			t.Error("Delete should return true for existing key")
+		}
 		if _, exists := cache.Get("key4"); exists {
 			t.Error("Key should have been deleted")
+		}
+
+		// Test deleting non-existing key
+		deleted = cache.Delete("non-existing")
+		if deleted {
+			t.Error("Delete should return false for non-existing key")
+		}
+
+		// Test deleting same key twice
+		cache.Set("test", "value")
+		if !cache.Delete("test") {
+			t.Error("First delete should return true")
+		}
+		if cache.Delete("test") {
+			t.Error("Second delete should return false")
 		}
 	})
 
@@ -1239,10 +1257,7 @@ func TestClearObjectPoolRecycling(t *testing.T) {
 	runtime.ReadMemStats(&m1)
 
 	// Execute Clear operation
-	err := cache.Clear()
-	if err != nil {
-		t.Errorf("Clear failed: %v", err)
-	}
+	cache.Clear()
 
 	// Verify cache is empty
 	if cache.Count() != 0 {
@@ -1290,10 +1305,7 @@ func TestClearWithEvictionCallback(t *testing.T) {
 	cache.SetWithExpiration("key3", "value3", time.Hour)
 
 	// Execute Clear
-	err := cache.Clear()
-	if err != nil {
-		t.Errorf("Clear failed: %v", err)
-	}
+	cache.Clear()
 
 	// Verify callback was triggered correctly
 	if len(evictedKeys) != 3 {

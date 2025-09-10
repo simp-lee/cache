@@ -11,7 +11,7 @@ type CacheInterface interface {
 	SetWithExpiration(key string, value interface{}, expiration time.Duration)
 	Get(key string) (interface{}, bool)
 	GetWithExpiration(key string) (interface{}, *time.Time, bool)
-	Delete(key string) error
+	Delete(key string) bool
 	DeleteKeys(keys []string) int
 	DeletePrefix(prefix string) int
 	GetOrSet(key string, value interface{}) interface{}
@@ -22,7 +22,7 @@ type CacheInterface interface {
 	Keys() []string
 	Count() int
 	Has(key string) bool
-	Clear() error
+	Clear()
 	Close()
 	Group(name string) Group
 }
