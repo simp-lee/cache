@@ -7,7 +7,7 @@ type Group interface {
 	Set(key string, value interface{})
 	SetWithExpiration(key string, value interface{}, expiration time.Duration)
 	Get(key string) (interface{}, bool)
-	GetWithExpiration(key string) (interface{}, *time.Time, bool)
+	GetWithExpiration(key string) (interface{}, time.Time, bool)
 	Delete(key string) bool
 
 	// Batch delete operations
@@ -51,7 +51,7 @@ func (g *cacheGroup) Get(key string) (interface{}, bool) {
 	return g.cache.Get(g.buildKey(key))
 }
 
-func (g *cacheGroup) GetWithExpiration(key string) (interface{}, *time.Time, bool) {
+func (g *cacheGroup) GetWithExpiration(key string) (interface{}, time.Time, bool) {
 	return g.cache.GetWithExpiration(g.buildKey(key))
 }
 

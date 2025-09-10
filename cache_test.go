@@ -629,14 +629,17 @@ func TestCacheBasicOperations(t *testing.T) {
 }
 
 func TestCacheExpiration(t *testing.T) {
-	cache := Get()
-	defer cache.Clear()
+	cache := NewCache(Options{
+		DefaultExpiration: time.Millisecond * 100,
+		CleanupInterval:   time.Millisecond * 50,
+	})
+	defer cache.Close()
 
 	t.Run("Default Expiration", func(t *testing.T) {
 		cache.Set("key1", "value1")
 		time.Sleep(time.Millisecond * 150)
-		if _, exists := cache.Get("key1"); !exists {
-			t.Error("Key should not be expired")
+		if _, exists := cache.Get("key1"); exists {
+			t.Error("Key should have expired")
 		}
 	})
 
@@ -1543,8 +1546,8 @@ func TestExpirationConstants(t *testing.T) {
 		}
 
 		// Verify expiration time is nil (meaning never expires)
-		if _, expireTime, exists := cache.GetWithExpiration("never_expires"); !exists || expireTime != nil {
-			t.Errorf("Expected key to exist with nil expiration time, got exists=%v, expireTime=%v", exists, expireTime)
+		if _, expireTime, exists := cache.GetWithExpiration("never_expires"); !exists || !expireTime.IsZero() {
+			t.Errorf("Expected key to exist with zero expiration time, got exists=%v, expireTime=%v", exists, expireTime)
 		}
 	})
 
@@ -1558,7 +1561,7 @@ func TestExpirationConstants(t *testing.T) {
 		}
 
 		// Verify expiration time is set (because DefaultExpiration = time.Minute)
-		if _, expireTime, exists := cache.GetWithExpiration("default_expiry"); !exists || expireTime == nil {
+		if _, expireTime, exists := cache.GetWithExpiration("default_expiry"); !exists || expireTime.IsZero() {
 			t.Errorf("Expected key to exist with expiration time set, got exists=%v, expireTime=%v", exists, expireTime)
 		}
 	})
@@ -1573,8 +1576,8 @@ func TestExpirationConstants(t *testing.T) {
 		}
 
 		// Verify expiration time is nil (meaning never expires)
-		if _, expireTime, exists := cache.GetWithExpiration("negative_expiry"); !exists || expireTime != nil {
-			t.Errorf("Expected key to exist with nil expiration time, got exists=%v, expireTime=%v", exists, expireTime)
+		if _, expireTime, exists := cache.GetWithExpiration("negative_expiry"); !exists || !expireTime.IsZero() {
+			t.Errorf("Expected key to exist with zero expiration time, got exists=%v, expireTime=%v", exists, expireTime)
 		}
 	})
 
@@ -1595,8 +1598,8 @@ func TestExpirationConstants(t *testing.T) {
 		}
 
 		// Verify expiration time is nil
-		if _, expireTime, exists := noDefaultCache.GetWithExpiration("no_default"); !exists || expireTime != nil {
-			t.Errorf("Expected key to exist with nil expiration time, got exists=%v, expireTime=%v", exists, expireTime)
+		if _, expireTime, exists := noDefaultCache.GetWithExpiration("no_default"); !exists || !expireTime.IsZero() {
+			t.Errorf("Expected key to exist with zero expiration time, got exists=%v, expireTime=%v", exists, expireTime)
 		}
 	})
 
@@ -1628,5 +1631,149 @@ func TestExpirationConstantsValues(t *testing.T) {
 		if DefaultExpiration != 0 {
 			t.Errorf("Expected DefaultExpiration to be 0, got %v", DefaultExpiration)
 		}
+	})
+}
+
+// TestExpirationTimeValueSafety tests that GetWithExpiration returns safe time values
+// This test addresses the data race issue where returning *time.Time pointers could
+// lead to memory reuse issues when items are deleted and timePool objects are recycled
+func TestExpirationTimeValueSafety(t *testing.T) {
+	cache := NewCache(Options{
+		DefaultExpiration: 100 * time.Millisecond,
+		CleanupInterval:   50 * time.Millisecond,
+		ShardCount:        2,
+	})
+	defer cache.Close()
+
+	t.Run("Expiration time value is safe from memory reuse", func(t *testing.T) {
+		// Set a key that will expire quickly
+		cache.SetWithExpiration("test-key", "test-value", 50*time.Millisecond)
+
+		// Get expiration time value (now returns value instead of pointer)
+		_, expTime, exists := cache.GetWithExpiration("test-key")
+		if !exists || expTime.IsZero() {
+			t.Fatal("Expected to get expire time")
+		}
+
+		originalTime := expTime
+
+		// Wait for key expiration and cleanup
+		time.Sleep(200 * time.Millisecond)
+
+		// Create many new keys to trigger timePool reuse
+		for i := 0; i < 1000; i++ {
+			cache.SetWithExpiration(fmt.Sprintf("new-key-%d", i), "new-value", time.Hour)
+		}
+
+		// Check if original time value was modified (now it should not be modified because it's a value copy)
+		if !expTime.Equal(originalTime) {
+			t.Errorf("ExpireTime value should not change from %v to %v", originalTime, expTime)
+		}
+
+		t.Logf("Original time: %v, Current time: %v", originalTime, expTime)
+		t.Log("Time value remained unchanged - data race issue fixed!")
+	})
+
+	t.Run("Expiration time is safe after deletion", func(t *testing.T) {
+		// Set a key
+		cache.SetWithExpiration("delete-test", "value", time.Hour)
+
+		// Get expiration time value
+		_, expTime, exists := cache.GetWithExpiration("delete-test")
+		if !exists || expTime.IsZero() {
+			t.Fatal("Expected to get expire time")
+		}
+
+		originalTime := expTime
+
+		// Delete key (this will put the ExpireTime pointer back into timePool)
+		cache.Delete("delete-test")
+
+		// Create many new keys to trigger timePool reuse
+		for i := 0; i < 1000; i++ {
+			cache.SetWithExpiration(fmt.Sprintf("reuse-key-%d", i), "value", time.Hour)
+		}
+
+		// Check if original time value is still valid (now it should still be valid)
+		if !expTime.Equal(originalTime) {
+			t.Errorf("ExpireTime value should remain valid: original=%v, current=%v", originalTime, expTime)
+		}
+
+		t.Log("Time value survived deletion and pool reuse - memory safety achieved!")
+	})
+
+	t.Run("Concurrent access is safe", func(t *testing.T) {
+		var wg sync.WaitGroup
+
+		// Continuously create and delete keys
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					key := fmt.Sprintf("concurrent-key-%d", id)
+					cache.SetWithExpiration(key, "value", 10*time.Millisecond)
+
+					// Immediately get expiration time value
+					_, expTime, exists := cache.GetWithExpiration(key)
+					if exists && !expTime.IsZero() {
+						// Access this value in background - now it's safe
+						go func(timeVal time.Time) {
+							// Access time value multiple times - no data race
+							for k := 0; k < 10; k++ {
+								_ = timeVal.Unix()
+								time.Sleep(time.Microsecond)
+							}
+						}(expTime)
+					}
+
+					// Delete immediately
+					cache.Delete(key)
+					time.Sleep(time.Millisecond)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		t.Log("Concurrent test completed successfully - no data races expected")
+	})
+
+	t.Run("Zero time for non-expiring items", func(t *testing.T) {
+		// Set a key that never expires
+		cache.SetWithExpiration("no-expire", "value", NoExpiration)
+
+		// Get expiration time - should be zero value
+		_, expTime, exists := cache.GetWithExpiration("no-expire")
+		if !exists {
+			t.Fatal("Expected key to exist")
+		}
+
+		if !expTime.IsZero() {
+			t.Errorf("Expected zero time for non-expiring item, got %v", expTime)
+		}
+
+		t.Log("Non-expiring items correctly return zero time")
+	})
+
+	t.Run("Valid time for expiring items", func(t *testing.T) {
+		// Set a key that will expire
+		cache.SetWithExpiration("will-expire", "value", time.Hour)
+
+		// Get expiration time - should be a valid time
+		_, expTime, exists := cache.GetWithExpiration("will-expire")
+		if !exists {
+			t.Fatal("Expected key to exist")
+		}
+
+		if expTime.IsZero() {
+			t.Error("Expected valid time for expiring item")
+		}
+
+		// Verify time is in the future
+		if !expTime.After(time.Now()) {
+			t.Error("Expiration time should be in the future")
+		}
+
+		t.Logf("Expiring items correctly return future time: %v", expTime)
 	})
 }

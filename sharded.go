@@ -113,7 +113,7 @@ func (sc *ShardedCache) Get(key string) (interface{}, bool) {
 }
 
 // GetWithExpiration implements CacheInterface
-func (sc *ShardedCache) GetWithExpiration(key string) (interface{}, *time.Time, bool) {
+func (sc *ShardedCache) GetWithExpiration(key string) (interface{}, time.Time, bool) {
 	return sc.getShard(key).getWithExpiration(key)
 }
 

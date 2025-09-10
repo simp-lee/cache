@@ -176,14 +176,14 @@ func (cs *cacheShard) get(key string) (interface{}, bool) {
 	return item.Value, true
 }
 
-func (cs *cacheShard) getWithExpiration(key string) (interface{}, *time.Time, bool) {
+func (cs *cacheShard) getWithExpiration(key string) (interface{}, time.Time, bool) {
 	now := time.Now()
 	cs.mu.RLock()
 	item, found := cs.items[key]
 	if !found {
 		cs.mu.RUnlock()
 		atomic.AddUint64(&cs.misses, 1)
-		return nil, nil, false
+		return nil, time.Time{}, false
 	}
 
 	// Check if the item has expired
@@ -191,12 +191,18 @@ func (cs *cacheShard) getWithExpiration(key string) (interface{}, *time.Time, bo
 		cs.mu.RUnlock()
 		atomic.AddUint64(&cs.misses, 1)
 		cs.delete(key)
-		return nil, nil, false
+		return nil, time.Time{}, false
+	}
+
+	// Return a copy of the expiration time to avoid pointer sharing issues
+	var expireTime time.Time
+	if item.ExpireTime != nil {
+		expireTime = *item.ExpireTime
 	}
 
 	cs.mu.RUnlock()
 	atomic.AddUint64(&cs.hits, 1)
-	return item.Value, item.ExpireTime, true
+	return item.Value, expireTime, true
 }
 
 func (cs *cacheShard) delete(key string) bool {

@@ -6,6 +6,7 @@ A high-performance sharded in-memory cache for Go, featuring group namespaces, d
 This is a new version of [SwiftCache](https://github.com/simp-lee/SwiftCache). Both versions use sharded architecture for high concurrent performance, but with different focus:
 
 ### Key Improvements in this version
+- **Memory Safety**: Fixed data race issues in `GetWithExpiration` by returning time values instead of pointers, preventing memory corruption from object pool reuse
 - **Persistence Support**: Added ability to persist cache data to disk and reload on startup
 - **Enhanced Interface**: Added utility functions like `GetOrSet`, `GetOrSetFunc`, `GetWithExpiration`
 - **Comprehensive Statistics**: Added detailed cache statistics including hit rates and item counts
@@ -128,10 +129,10 @@ type CacheInterface interface {
     Get(key string) (interface{}, bool)
     
     // GetWithExpiration retrieves a value and its expiration time from the cache
-    GetWithExpiration(key string) (interface{}, *time.Time, bool)
+    GetWithExpiration(key string) (interface{}, time.Time, bool)
     
     // Delete removes a value from the cache
-    Delete(key string) error
+    Delete(key string) bool
     
     // DeleteKeys deletes the specified keys in batch and returns the number of keys actually deleted
     DeleteKeys(keys []string) int
@@ -164,7 +165,7 @@ type CacheInterface interface {
     Has(key string) bool
     
     // Clear removes all items from the cache
-    Clear() error
+    Clear()
     
     // Close shuts down the cache and persists data if configured
     Close()
@@ -178,19 +179,21 @@ type Group interface {
     Set(key string, value interface{})
     SetWithExpiration(key string, value interface{}, expiration time.Duration)
     Get(key string) (interface{}, bool)
-    GetWithExpiration(key string) (interface{}, *time.Time, bool)
-    Delete(key string) error
+    GetWithExpiration(key string) (interface{}, time.Time, bool)
+    Delete(key string) bool
+    
+    // Batch delete operations
+    DeleteKeys(keys []string) int
+    DeletePrefix(prefix string) int
     
     // Convenience methods
     GetOrSet(key string, value interface{}) interface{}
     GetOrSetFunc(key string, f func() interface{}) interface{}
     GetOrSetFuncWithExpiration(key string, f func() interface{}, expiration time.Duration) interface{}
-    DeleteKeys(keys []string) int
-    DeletePrefix(prefix string) int
     
     // Group management
     Keys() []string
-    Clear() error
+    Clear()
     Count() int
     Has(key string) bool
 }
@@ -351,6 +354,43 @@ fmt.Println(value) // type-safe access to User struct
 value, exists = shardedcache.GetTyped[int](cache, "key")
 fmt.Println(value) // 0, false
 ```
+
+#### 5. Safe Expiration Time Access
+
+The `GetWithExpiration` method now returns `time.Time` values instead of pointers, ensuring memory safety and preventing data races:
+
+```go
+// Set a value with expiration
+cache.SetWithExpiration("key", "value", time.Hour)
+
+// Get value with expiration time - returns safe time value copy
+value, expTime, exists := cache.GetWithExpiration("key")
+if exists {
+    fmt.Printf("Value: %v, Expires at: %v\n", value, expTime)
+    
+    // The expTime is a value copy, safe to use even after the item is deleted
+    // This prevents data race issues that could occur with pointer returns
+    
+    // Safe to access expTime properties
+    if !expTime.IsZero() {
+        remaining := time.Until(expTime)
+        fmt.Printf("Time remaining: %v\n", remaining)
+    }
+}
+
+// For non-expiring items, expTime will be zero value
+cache.SetWithExpiration("permanent", "value", shardedcache.NoExpiration)
+value, expTime, exists = cache.GetWithExpiration("permanent")
+if exists && expTime.IsZero() {
+    fmt.Println("Item never expires")
+}
+```
+
+**Memory Safety Benefits:**
+- No risk of accessing deallocated memory
+- Thread-safe access to expiration times
+- Eliminates data race conditions in concurrent environments
+- Compatible with object pool optimizations
 
 ### Configuration Options
 
